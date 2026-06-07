@@ -7,6 +7,8 @@
 #include <memory>
 #include <phosg/Strings.hh>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "Client.hh"
 #include "ClientFunctionIndex.hh"
@@ -371,6 +373,12 @@ void send_destroy_item_to_lobby(std::shared_ptr<Client> c, uint32_t item_id, uin
 void send_destroy_floor_item_to_client(std::shared_ptr<Client> c, uint32_t item_id, uint32_t floor);
 void send_item_identify_result(std::shared_ptr<Client> c);
 void send_bank(std::shared_ptr<Client> c);
+// Builds the 6xB6 shop-contents packet, clamping the item count to the packet's
+// fixed capacity. Returns the packet and the number of bytes to send. Exposed
+// (rather than living inside send_shop) so the clamping can be unit-tested
+// without standing up a live Client/Channel.
+std::pair<G_ShopContents_BB_6xB6, size_t> build_shop_contents_packet(
+    uint8_t shop_type, const std::vector<ItemData>& contents);
 void send_shop(std::shared_ptr<Client> c, uint8_t shop_type);
 void send_level_up(std::shared_ptr<Client> c);
 void send_give_experience(std::shared_ptr<Client> c, uint32_t amount, uint16_t entity_id);

@@ -1100,7 +1100,7 @@ void ItemCreator::generate_armor_shop_armors(std::vector<ItemData>& shop, Episod
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->armor_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 1;
@@ -1138,7 +1138,7 @@ void ItemCreator::generate_armor_shop_shields(std::vector<ItemData>& shop, size_
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->shield_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 2;
@@ -1175,7 +1175,7 @@ void ItemCreator::generate_armor_shop_units(std::vector<ItemData>& shop, size_t 
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->unit_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 3;
@@ -1250,7 +1250,7 @@ void ItemCreator::generate_rare_tool_shop_recovery_items(std::vector<ItemData>& 
 
   size_t effective_num_items = num_items;
   size_t items_generated = 0;
-  while (items_generated < effective_num_items) {
+  while ((items_generated < effective_num_items) && (pt.count > 0)) {
     uint8_t type = pt.pop();
     if (type == 0x0F) {
       if (effective_num_items == num_items) {
@@ -1284,7 +1284,7 @@ void ItemCreator::generate_tool_shop_tech_disks(std::vector<ItemData>& shop, siz
   pt.shuffle(this->rand_crypt);
 
   size_t items_generated = 0;
-  while (items_generated < num_items) {
+  while ((items_generated < num_items) && (pt.count > 0)) {
     uint8_t tech_num_index = pt.pop();
     ItemData item;
     item.data1[0] = 3;
@@ -1372,7 +1372,7 @@ std::vector<ItemData> ItemCreator::generate_weapon_shop_contents(size_t player_l
   pt.shuffle(this->rand_crypt);
 
   std::vector<ItemData> shop;
-  while (shop.size() < num_items) {
+  while ((shop.size() < num_items) && (pt.count > 0)) {
     ItemData item;
 
     const std::pair<uint8_t, uint8_t>* def;
@@ -1456,7 +1456,11 @@ void ItemCreator::generate_weapon_shop_item_special(ItemData& item, size_t playe
 
   // Note: The original code shuffles pt and then pops a single value from it. For simplicity, we just sample a single
   // value instead.
-  switch (pt.sample(this->rand_crypt)) {
+  uint32_t special_mode = 0;
+  if (pt.count > 0) {
+    special_mode = pt.sample(this->rand_crypt);
+  }
+  switch (special_mode) {
     case 0:
       item.data1[4] = 0;
       break;
@@ -1498,7 +1502,12 @@ void ItemCreator::generate_weapon_shop_item_bonus1(ItemData& item, size_t player
 
   // Note: The original code shuffles pt and then pops a single value from it. For simplicity, we just sample a single
   // value instead.
-  item.data1[6] = pt.sample(this->rand_crypt);
+  if (pt.count == 0) {
+    item.data1[6] = 0;
+  } else {
+    item.data1[6] = pt.sample(this->rand_crypt);
+  }
+
   if (item.data1[6] == 0) {
     item.data1[7] = 0;
   } else {
@@ -1532,9 +1541,13 @@ void ItemCreator::generate_weapon_shop_item_bonus2(ItemData& item, size_t player
   ProbabilityTable<uint32_t, 100> pt{this->weapon_random_set->bonus_type_table2.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  do {
+  item.data1[8] = 0;
+  while (pt.count > 0) {
     item.data1[8] = pt.pop();
-  } while ((item.data1[8] != 0) && (item.data1[8] == item.data1[6]));
+    if ((item.data1[8] == 0) || (item.data1[8] != item.data1[6])) {
+      break;
+    }
+  }
 
   if (item.data1[8] == 0) {
     item.data1[9] = 0;
