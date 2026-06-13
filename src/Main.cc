@@ -53,6 +53,7 @@
 #include "StaticGameData.hh"
 #include "Text.hh"
 #include "TextIndex.hh"
+#include "ItemCreator.hh"
 
 bool use_terminal_colors = false;
 
@@ -3773,6 +3774,333 @@ Action a_check_quests(
           }
         }
       }
+    });
+
+Action a_test_shop_generation(
+    "test-shop-generation", nullptr,
+    +[](phosg::Arguments& args) {
+      auto s = std::make_shared<ServerState>(get_config_filename(args));
+      s->load_all(false);
+
+      phosg::JSON tool_json = phosg::JSON::dict({
+        {"CommonRecoveryTable", phosg::JSON::list({
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}),
+          phosg::JSON::list(),
+        })},
+        {"RareRecoveryTable", phosg::JSON::list({
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+        })},
+        {"TechDiskTable", phosg::JSON::list({
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list({
+            phosg::JSON::list({0, 10}),
+            phosg::JSON::list({1, 10}),
+            phosg::JSON::list({2, 10}),
+            phosg::JSON::list({3, 10}),
+            phosg::JSON::list({4, 10}),
+            phosg::JSON::list({5, 10}),
+            phosg::JSON::list({6, 10}),
+            phosg::JSON::list({7, 10}),
+            phosg::JSON::list({8, 10}),
+            phosg::JSON::list({9, 10}),
+          }),
+        })},
+        {"TechDiskLevelTable", phosg::JSON::list({
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list(),
+          phosg::JSON::list({
+            phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(),
+            phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(),
+            phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(), phosg::JSON::dict(),
+            phosg::JSON::dict(), phosg::JSON::dict()
+          }),
+        })}
+      });
+
+      auto custom_tool_set = std::make_shared<ToolShopRandomSet>(tool_json);
+      auto rand_crypt = std::make_shared<PSOV2Encryption>(12345);
+
+      ItemCreator creator(
+          s->common_item_set(Version::BB_V4, nullptr),
+          s->rare_item_set(Version::BB_V4, nullptr),
+          s->armor_random_set,
+          custom_tool_set,
+          s->weapon_random_set(Difficulty::NORMAL),
+          s->tekker_adjustment_set,
+          s->item_parameter_table(Version::BB_V4),
+          s->item_stack_limits(Version::BB_V4),
+          GameMode::NORMAL,
+          Difficulty::NORMAL,
+          0,
+          rand_crypt
+      );
+
+      // Extended layout (BBShopItemLimits enabled): extended recovery table -> exactly 13 tools + 5 disks.
+      auto curated = ItemCreator::curate_tool_shop_contents(creator.generate_tool_shop_contents(80, true), true);
+
+      size_t num_tools = 0;
+      size_t num_disks = 0;
+      bool has_telepipe = false;
+      bool has_moon = false;
+      bool has_trap_vision = false;
+      for (const auto& item : curated) {
+        if (item.data1[0] == 3 && item.data1[1] == 2) {
+          num_disks++;
+        } else {
+          num_tools++;
+          if (item.data1[1] == 7) has_telepipe = true;
+          if (item.data1[1] == 4) has_moon = true;
+          if (item.data1[1] == 8) has_trap_vision = true;
+        }
+      }
+
+      if (num_tools != 13) {
+        throw std::runtime_error(std::format("Expected exactly 13 tools, got {}", num_tools));
+      }
+      if (num_disks != 5) {
+        throw std::runtime_error(std::format("Expected exactly 5 disks, got {}", num_disks));
+      }
+      if (curated.size() != 18) {
+        throw std::runtime_error(std::format("Expected exactly 18 shop contents, got {}", curated.size()));
+      }
+      if (!has_telepipe || !has_moon || !has_trap_vision) {
+        throw std::runtime_error("Priority items (Telepipe/Moon/Trap Vision) are missing from the curated tools selection");
+      }
+
+      // Default layout (BBShopItemLimits disabled): the vanilla tool shop is sent as generated (no
+      // curation). Verify it stays at or below the 18-item BB tool-shop softlock limit at every level
+      // bracket, including the highest-population brackets.
+      for (size_t test_level : {1, 10, 25, 44, 60, 99, 100, 200}) {
+        auto def = creator.generate_tool_shop_contents(test_level);
+        if (def.size() > 18) {
+          throw std::runtime_error(std::format("Default tool shop at level {} has {} items (exceeds softlock limit of 18)", test_level, def.size()));
+        }
+      }
+
+      phosg::fwrite_fmt(stdout, "Shop generation test passed successfully.\n");
+    });
+
+Action a_test_shop_safety(
+    "test-shop-safety", nullptr,
+    +[](phosg::Arguments& args) {
+      // Part 1: the 6xB6 packet builder must clamp to the packet's fixed
+      // capacity, never overflowing item_datas or underflowing the length.
+      {
+        size_t capacity = decltype(G_ShopContents_BB_6xB6::item_datas)::size();
+
+        std::vector<ItemData> oversized(capacity + 5);
+        for (size_t x = 0; x < oversized.size(); x++) {
+          oversized[x].data1[0] = static_cast<uint8_t>(x); // tag each item to check ordering
+        }
+        auto [big_cmd, big_size] = build_shop_contents_packet(0, oversized);
+        if (big_cmd.num_items != capacity) {
+          throw std::runtime_error(std::format("Expected num_items clamped to {}, got {}", capacity, big_cmd.num_items));
+        }
+        if (big_size != sizeof(G_ShopContents_BB_6xB6)) {
+          throw std::runtime_error(std::format("Expected full packet size {}, got {}", sizeof(G_ShopContents_BB_6xB6), big_size));
+        }
+        if (big_cmd.item_datas[capacity - 1].data1[0] != static_cast<uint8_t>(capacity - 1)) {
+          throw std::runtime_error("Last retained item does not match input ordering");
+        }
+
+        std::vector<ItemData> small(5);
+        auto [small_cmd, small_size] = build_shop_contents_packet(1, small);
+        size_t expected_small = sizeof(G_ShopContents_BB_6xB6) - sizeof(ItemData) * (capacity - 5);
+        if (small_cmd.num_items != 5) {
+          throw std::runtime_error(std::format("Expected num_items 5, got {}", small_cmd.num_items));
+        }
+        if (small_size != expected_small) {
+          throw std::runtime_error(std::format("Expected packet size {}, got {}", expected_small, small_size));
+        }
+      }
+
+      // Part 1b: curate_tool_shop_contents must keep the tool shop within the BB softlock limit (18 items)
+      // and must never drop Telepipe/Trap Vision (the items the original truncation bug discarded). Runs
+      // before load_all so it executes even where the static game data is unavailable.
+      {
+        auto make_tool = [](uint8_t subtype, uint8_t type) {
+          ItemData item;
+          item.data1[0] = 3;
+          item.data1[1] = subtype;
+          item.data1[2] = type;
+          return item;
+        };
+        // 13 distinct tools (incl. Telepipe=7 and Trap Vision=8, plus lowest-priority Monomate/Monofluid)
+        // and 7 tech disks (subtype 2) = 20 items, which would softlock the client if sent verbatim.
+        std::vector<ItemData> raw = {
+            make_tool(7, 0), make_tool(8, 0), make_tool(4, 0), make_tool(3, 0), make_tool(5, 0),
+            make_tool(0, 2), make_tool(1, 2), make_tool(0, 1), make_tool(1, 1), make_tool(6, 0),
+            make_tool(6, 1), make_tool(0, 0), make_tool(1, 0)};
+        for (uint8_t i = 0; i < 7; i++) {
+          raw.emplace_back(make_tool(2, i));
+        }
+
+        auto check = [](const std::vector<ItemData>& v, size_t& disks, bool& has_pipe, bool& has_trap) {
+          disks = 0;
+          has_pipe = false;
+          has_trap = false;
+          for (const auto& it : v) {
+            if (it.data1[0] == 3 && it.data1[1] == 2) {
+              disks++;
+            } else if (it.data1[1] == 7) {
+              has_pipe = true;
+            } else if (it.data1[1] == 8) {
+              has_trap = true;
+            }
+          }
+        };
+
+        size_t disks = 0;
+        bool has_pipe = false;
+        bool has_trap = false;
+
+        auto curated = ItemCreator::curate_tool_shop_contents(raw, true);
+        check(curated, disks, has_pipe, has_trap);
+        if (curated.size() > 18) {
+          throw std::runtime_error(std::format("Curated tool shop has {} items (exceeds softlock limit 18)", curated.size()));
+        }
+        if (disks > 5) {
+          throw std::runtime_error(std::format("Curated tool shop has {} disks (exceeds 5)", disks));
+        }
+        if (!has_pipe || !has_trap) {
+          throw std::runtime_error("Curated tool shop dropped Telepipe/Trap Vision");
+        }
+
+        auto uncurated = ItemCreator::curate_tool_shop_contents(raw, false);
+        check(uncurated, disks, has_pipe, has_trap);
+        if (uncurated.size() > 18) {
+          throw std::runtime_error(std::format("Uncurated-cap tool shop has {} items (exceeds softlock limit 18)", uncurated.size()));
+        }
+        if (!has_pipe || !has_trap) {
+          throw std::runtime_error("Uncurated-cap tool shop dropped Telepipe/Trap Vision");
+        }
+
+        phosg::fwrite_fmt(stdout, "Shop cap test passed (curated={} items, uncurated-cap={} items; Telepipe/Trap Vision retained in both).\n", curated.size(), uncurated.size());
+      }
+
+      // Part 2 & 3 need the static game data (item parameters, prices, etc.).
+      auto s = std::make_shared<ServerState>(get_config_filename(args));
+      s->load_all(false);
+      auto rand_crypt = std::make_shared<PSOV2Encryption>(12345);
+
+      // Part 2: weapon generation against empty bonus/special tables must not
+      // throw (exercises the count==0 guards in special/bonus1/bonus2 and the
+      // exhaustion guard in generate_weapon_shop_contents). A probability table
+      // is "empty" when every weight is 0, so all-zero pairs give count 0.
+      {
+        auto zero_pair = []() -> phosg::JSON { return phosg::JSON::list({0, 0}); };
+        auto zero_pairs = [&](size_t n) -> phosg::JSON {
+          auto l = phosg::JSON::list();
+          for (size_t i = 0; i < n; i++) {
+            l.emplace_back(zero_pair());
+          }
+          return l;
+        };
+        auto zero_grid = [&](size_t rows, size_t cols) -> phosg::JSON {
+          auto l = phosg::JSON::list();
+          for (size_t i = 0; i < rows; i++) {
+            l.emplace_back(zero_pairs(cols));
+          }
+          return l;
+        };
+
+        // One real weapon type (type_defs[0] = Saber) with nonzero weight so
+        // the main loop runs and reaches the bonus/special code.
+        auto weight_tables = phosg::JSON::list();
+        for (int t = 0; t < 5; t++) {
+          auto row = phosg::JSON::list();
+          row.emplace_back(phosg::JSON::list({0, 10}));
+          auto table = phosg::JSON::list();
+          table.emplace_back(std::move(row)); // section_id 0
+          weight_tables.emplace_back(std::move(table));
+        }
+
+        phosg::JSON weapon_json = phosg::JSON::dict({
+            {"WeaponTypeWeightTables", std::move(weight_tables)},
+            {"BonusTypeTable1", zero_grid(9, 6)},
+            {"BonusTypeTable2", zero_grid(9, 6)},
+            {"BonusRangeTable1", zero_pairs(9)},
+            {"BonusRangeTable2", zero_pairs(9)},
+            {"SpecialModeTable", zero_grid(8, 3)},
+            {"DefaultDringRangeTable", zero_pairs(6)},
+            {"FavoredDringRangeTable", zero_pairs(6)},
+        });
+
+        auto custom_weapon_set = std::make_shared<WeaponShopRandomSet>(weapon_json);
+        ItemCreator creator(
+            s->common_item_set(Version::BB_V4, nullptr),
+            s->rare_item_set(Version::BB_V4, nullptr),
+            s->armor_random_set,
+            s->tool_random_set,
+            custom_weapon_set,
+            s->tekker_adjustment_set,
+            s->item_parameter_table(Version::BB_V4),
+            s->item_stack_limits(Version::BB_V4),
+            GameMode::NORMAL,
+            Difficulty::NORMAL,
+            0,
+            rand_crypt);
+
+        auto weapon_shop = creator.generate_weapon_shop_contents(80);
+        if (weapon_shop.empty()) {
+          throw std::runtime_error("Expected at least one weapon to be generated");
+        }
+        for (const auto& item : weapon_shop) {
+          if (item.data1[4] != 0 || item.data1[6] != 0 || item.data1[8] != 0) {
+            throw std::runtime_error("Expected special/bonus slots to be 0 when their tables are empty");
+          }
+        }
+      }
+
+      // Part 3: tool generation against empty tables must not throw (exercises
+      // the count>0 guards in the rare-recovery and tech-disk loops).
+      {
+        auto empty_rows = [](size_t n) -> phosg::JSON {
+          auto l = phosg::JSON::list();
+          for (size_t i = 0; i < n; i++) {
+            l.emplace_back(phosg::JSON::list());
+          }
+          return l;
+        };
+        phosg::JSON tool_json = phosg::JSON::dict({
+            {"CommonRecoveryTable", empty_rows(6)},
+            {"RareRecoveryTable", empty_rows(5)},
+            {"TechDiskTable", empty_rows(5)},
+            {"TechDiskLevelTable", empty_rows(5)},
+        });
+
+        auto custom_tool_set = std::make_shared<ToolShopRandomSet>(tool_json);
+        ItemCreator creator(
+            s->common_item_set(Version::BB_V4, nullptr),
+            s->rare_item_set(Version::BB_V4, nullptr),
+            s->armor_random_set,
+            custom_tool_set,
+            s->weapon_random_set(Difficulty::NORMAL),
+            s->tekker_adjustment_set,
+            s->item_parameter_table(Version::BB_V4),
+            s->item_stack_limits(Version::BB_V4),
+            GameMode::NORMAL,
+            Difficulty::NORMAL,
+            0,
+            rand_crypt);
+
+        creator.generate_tool_shop_contents(80); // must not throw
+      }
+
+      phosg::fwrite_fmt(stdout, "Shop safety test passed successfully.\n");
     });
 
 Action a_check_ep3_maps(

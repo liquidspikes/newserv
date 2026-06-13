@@ -348,6 +348,11 @@ ToolShopRandomSet::ToolShopRandomSet(const std::string& data, bool big_endian)
 
 ToolShopRandomSet::ToolShopRandomSet(const phosg::JSON& json) {
   this->common_recovery_table = table_for_json_t<uint8_t>(json.at("CommonRecoveryTable"));
+  // Optional; absent in binary .rel-derived data and older JSON. When missing, the extended shop falls
+  // back to common_recovery_table (see ItemCreator::generate_common_tool_shop_recovery_items).
+  if (json.count("ExtendedCommonRecoveryTable")) {
+    this->extended_common_recovery_table = table_for_json_t<uint8_t>(json.at("ExtendedCommonRecoveryTable"));
+  }
   this->rare_recovery_table = table_for_json_t<IntPairT<uint8_t>>(json.at("RareRecoveryTable"));
   this->tech_disk_table = table_for_json_t<IntPairT<uint8_t>>(json.at("TechDiskTable"));
   this->tech_disk_level_table = table_for_json_t<TechDiskLevelEntry>(json.at("TechDiskLevelTable"));
@@ -419,12 +424,17 @@ std::string ToolShopRandomSet::serialize_binary(bool big_endian) const {
 }
 
 phosg::JSON ToolShopRandomSet::json() const {
-  return phosg::JSON::dict({
+  auto dict = phosg::JSON::dict({
       {"CommonRecoveryTable", json_for_table_t(this->common_recovery_table)},
       {"RareRecoveryTable", json_for_table_t(this->rare_recovery_table)},
       {"TechDiskTable", json_for_table_t(this->tech_disk_table)},
       {"TechDiskLevelTable", json_for_table_t(this->tech_disk_level_table)},
   });
+  // Only emit the optional table when it was actually loaded, so binary-derived sets round-trip unchanged.
+  if (!this->extended_common_recovery_table.empty()) {
+    dict.emplace("ExtendedCommonRecoveryTable", json_for_table_t(this->extended_common_recovery_table));
+  }
+  return dict;
 }
 
 void ToolShopRandomSet::print(FILE* stream) const {

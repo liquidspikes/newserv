@@ -1162,6 +1162,17 @@
   // whether it's enabled by default for all players or not.
   "EnableSwitchAssistByDefault": false,
 
+  // Enables the extended BB shop layouts. When disabled (the default), shops match vanilla newserv exactly: tool shops use
+  // the vanilla CommonRecoveryTable, and weapon/armor shops are sent as generated. When enabled, the tool shop is instead
+  // drawn from the ExtendedCommonRecoveryTable (every recovery tool at every level bracket, in tool-shop-random-set.json)
+  // and curated into a client-safe fixed layout: tools and tech disks are split, tools are priority-sorted (Telepipe, Trap
+  // Vision, Moon/Sol Atomizers, Tri/Di mates, etc. are kept first), and the shop is capped at 13 tools + 5 tech disks (18
+  // total); weapon/armor shops are capped at 16/20. The extended tool shop is always capped at 18 items because the BB
+  // client softlocks when a tool shop contains more than 18. This is server-side only (no client patch required) and does
+  // not affect item legality, so it does not need to be consistent across players. All shops also remain hard-capped at the
+  // 20-item 6xB6 packet limit, and the shop generation overflow guards are always active.
+  "BBShopItemLimits": false,
+
   // Whether to enable rare drop notifications by default. Players can toggle this behavior for themselves with the
   // $itemnotifs command.
   "RareNotificationsEnabledByDefaultV1V2": false,

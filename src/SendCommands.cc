@@ -3189,25 +3189,41 @@ void send_bank(std::shared_ptr<Client> c) {
   send_command_t_vt(c, 0x6C, 0x00, cmd, bank->items);
 }
 
+std::pair<G_ShopContents_BB_6xB6, size_t> build_shop_contents_packet(
+    uint8_t shop_type, const std::vector<ItemData>& contents) {
+  G_ShopContents_BB_6xB6 cmd;
+
+  // The 6xB6 packet has a fixed-size item array; never write or report more
+  // than it can hold. Clamping here makes the send safe regardless of how the
+  // caller populated bb_shop_contents (a larger list is silently truncated
+  // rather than overflowing the buffer / underflowing the length calculation).
+  size_t capacity = cmd.item_datas.size();
+  size_t count = std::min<size_t>(contents.size(), capacity);
+
+  cmd.header = {0xB6, static_cast<uint8_t>(2 + (sizeof(ItemData) >> 2) * count), 0x0000};
+  cmd.shop_type = shop_type;
+  cmd.num_items = static_cast<uint8_t>(count);
+  cmd.unused = 0;
+  for (size_t x = 0; x < count; x++) {
+    cmd.item_datas[x] = contents[x];
+  }
+
+  return {cmd, sizeof(cmd) - sizeof(cmd.item_datas[0]) * (capacity - count)};
+}
+
 void send_shop(std::shared_ptr<Client> c, uint8_t shop_type) {
   if (c->version() != Version::BB_V4) {
     throw std::logic_error("6xB6 can only be sent to BB clients");
   }
 
   const auto& contents = c->bb_shop_contents.at(shop_type);
-
-  G_ShopContents_BB_6xB6 cmd = {
-      {0xB6, static_cast<uint8_t>(2 + (sizeof(ItemData) >> 2) * contents.size()), 0x0000},
-      shop_type,
-      static_cast<uint8_t>(contents.size()),
-      0,
-      {},
-  };
-  for (size_t x = 0; x < contents.size(); x++) {
-    cmd.item_datas[x] = contents[x];
+  size_t capacity = decltype(G_ShopContents_BB_6xB6::item_datas)::size();
+  if (contents.size() > capacity) {
+    c->log.warning_f("Shop type {} has {} items, which exceeds client packet capacity ({}); truncating", shop_type, contents.size(), capacity);
   }
 
-  send_command(c, 0x60, 0x00, &cmd, sizeof(cmd) - sizeof(cmd.item_datas[0]) * (20 - contents.size()));
+  auto packet = build_shop_contents_packet(shop_type, contents);
+  send_command(c, 0x60, 0x00, &packet.first, packet.second);
 }
 
 void send_level_up(std::shared_ptr<Client> c) {

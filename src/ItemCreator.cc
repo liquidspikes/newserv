@@ -1100,7 +1100,7 @@ void ItemCreator::generate_armor_shop_armors(std::vector<ItemData>& shop, Episod
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->armor_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 1;
@@ -1138,7 +1138,7 @@ void ItemCreator::generate_armor_shop_shields(std::vector<ItemData>& shop, size_
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->shield_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 2;
@@ -1175,7 +1175,7 @@ void ItemCreator::generate_armor_shop_units(std::vector<ItemData>& shop, size_t 
   ProbabilityTable<uint8_t, 100> pt{this->armor_random_set->unit_table.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  for (size_t items_generated = 0; items_generated < num_items;) {
+  for (size_t items_generated = 0; (items_generated < num_items) && (pt.count > 0);) {
     ItemData item;
     item.data1[0] = 1;
     item.data1[1] = 3;
@@ -1187,11 +1187,82 @@ void ItemCreator::generate_armor_shop_units(std::vector<ItemData>& shop, size_t 
   }
 }
 
-std::vector<ItemData> ItemCreator::generate_tool_shop_contents(size_t player_level) {
+std::vector<ItemData> ItemCreator::generate_tool_shop_contents(size_t player_level, bool use_extended_recovery_table) {
   std::vector<ItemData> shop;
-  this->generate_common_tool_shop_recovery_items(shop, player_level);
+  this->generate_common_tool_shop_recovery_items(shop, player_level, use_extended_recovery_table);
   this->generate_rare_tool_shop_recovery_items(shop, player_level);
   this->generate_tool_shop_tech_disks(shop, player_level);
+  sort(shop.begin(), shop.end(), ItemData::compare_for_sort);
+  return shop;
+}
+
+std::vector<ItemData> ItemCreator::curate_tool_shop_contents(std::vector<ItemData> raw_contents, bool apply_limits) {
+  // The most a BB tool shop may contain before the client runs out of UI memory and softlocks. The
+  // curated (apply_limits) layout targets exactly 13 tools + 5 disks; MAX_TOTAL is also enforced when
+  // apply_limits is false, as an unconditional safety cap.
+  static constexpr size_t MAX_TOOLS = 13;
+  static constexpr size_t MAX_DISKS = 5;
+  static constexpr size_t MAX_TOTAL = 18;
+
+  std::vector<ItemData> tools;
+  std::vector<ItemData> disks;
+  for (const auto& item : raw_contents) {
+    if (item.data1[0] == 3 && item.data1[1] == 2) {
+      disks.push_back(item);
+    } else {
+      tools.push_back(item);
+    }
+  }
+
+  // Lower number = higher priority (kept when trimming). Telepipe and Trap Vision are both kept first
+  // so they are never the items dropped by a cap (the original bug truncated exactly these two).
+  auto tool_priority = [](const ItemData& item) -> int {
+    uint8_t subtype = item.data1[1];
+    uint8_t type = item.data1[2];
+    if (subtype == 7) return 1; // Telepipe
+    if (subtype == 8) return 2; // Trap Vision
+    if (subtype == 4) return 3; // Moon Atomizer
+    if (subtype == 3) return 4; // Sol Atomizer
+    if (subtype == 5) return 5; // Star Atomizer
+    if (subtype == 0 && type == 2) return 6; // Trimate
+    if (subtype == 1 && type == 2) return 7; // Trifluid
+    if (subtype == 0 && type == 1) return 8; // Dimate
+    if (subtype == 1 && type == 1) return 9; // Difluid
+    if (subtype == 6 && type == 0) return 10; // Antidote
+    if (subtype == 6 && type == 1) return 11; // Antiparalysis
+    if (subtype == 0 && type == 0) return 12; // Monomate
+    if (subtype == 1 && type == 0) return 13; // Monofluid
+    return 14;
+  };
+  std::stable_sort(tools.begin(), tools.end(), [&](const ItemData& a, const ItemData& b) {
+    return tool_priority(a) < tool_priority(b);
+  });
+
+  if (apply_limits) {
+    if (tools.size() > MAX_TOOLS) {
+      tools.resize(MAX_TOOLS);
+    }
+    if (disks.size() > MAX_DISKS) {
+      disks.resize(MAX_DISKS);
+    }
+  }
+
+  // Unconditional client-safety cap. Trim lowest-priority tools first (the priority sort above keeps
+  // Telepipe/Trap Vision/atomizers), then disks if disks alone would still exceed the limit.
+  if (tools.size() + disks.size() > MAX_TOTAL) {
+    size_t max_tools = (disks.size() >= MAX_TOTAL) ? 0 : (MAX_TOTAL - disks.size());
+    if (tools.size() > max_tools) {
+      tools.resize(max_tools);
+    }
+    if (disks.size() > MAX_TOTAL) {
+      disks.resize(MAX_TOTAL);
+    }
+  }
+
+  std::vector<ItemData> shop;
+  shop.reserve(tools.size() + disks.size());
+  shop.insert(shop.end(), tools.begin(), tools.end());
+  shop.insert(shop.end(), disks.begin(), disks.end());
   sort(shop.begin(), shop.end(), ItemData::compare_for_sort);
   return shop;
 }
@@ -1210,7 +1281,7 @@ size_t ItemCreator::get_table_index_for_tool_shop(size_t player_level) {
   }
 }
 
-void ItemCreator::generate_common_tool_shop_recovery_items(std::vector<ItemData>& shop, size_t player_level) {
+void ItemCreator::generate_common_tool_shop_recovery_items(std::vector<ItemData>& shop, size_t player_level, bool use_extended_recovery_table) {
   size_t table_index;
   if (player_level < 11) {
     table_index = 0;
@@ -1226,7 +1297,15 @@ void ItemCreator::generate_common_tool_shop_recovery_items(std::vector<ItemData>
     table_index = 5;
   }
 
-  for (const auto& entry : this->tool_random_set->common_recovery_table.at(table_index)) {
+  // The default tool shop uses the vanilla newserv common_recovery_table. The extended tool shop
+  // (BBShopItemLimits) instead uses the extended table, which offers every recovery tool at every
+  // bracket and is then curated down to a client-safe layout. Fall back to the default table if the
+  // extended table is unavailable (e.g. binary .rel-derived data) or does not cover this bracket.
+  const auto& extended = this->tool_random_set->extended_common_recovery_table;
+  const bool use_extended = use_extended_recovery_table && (table_index < extended.size());
+  const auto& recovery_table = use_extended ? extended : this->tool_random_set->common_recovery_table;
+
+  for (const auto& entry : recovery_table.at(table_index)) {
     if (entry == 0x0F) {
       continue;
     }
@@ -1250,7 +1329,7 @@ void ItemCreator::generate_rare_tool_shop_recovery_items(std::vector<ItemData>& 
 
   size_t effective_num_items = num_items;
   size_t items_generated = 0;
-  while (items_generated < effective_num_items) {
+  while ((items_generated < effective_num_items) && (pt.count > 0)) {
     uint8_t type = pt.pop();
     if (type == 0x0F) {
       if (effective_num_items == num_items) {
@@ -1284,7 +1363,7 @@ void ItemCreator::generate_tool_shop_tech_disks(std::vector<ItemData>& shop, siz
   pt.shuffle(this->rand_crypt);
 
   size_t items_generated = 0;
-  while (items_generated < num_items) {
+  while ((items_generated < num_items) && (pt.count > 0)) {
     uint8_t tech_num_index = pt.pop();
     ItemData item;
     item.data1[0] = 3;
@@ -1372,7 +1451,7 @@ std::vector<ItemData> ItemCreator::generate_weapon_shop_contents(size_t player_l
   pt.shuffle(this->rand_crypt);
 
   std::vector<ItemData> shop;
-  while (shop.size() < num_items) {
+  while ((shop.size() < num_items) && (pt.count > 0)) {
     ItemData item;
 
     const std::pair<uint8_t, uint8_t>* def;
@@ -1456,7 +1535,11 @@ void ItemCreator::generate_weapon_shop_item_special(ItemData& item, size_t playe
 
   // Note: The original code shuffles pt and then pops a single value from it. For simplicity, we just sample a single
   // value instead.
-  switch (pt.sample(this->rand_crypt)) {
+  uint32_t special_mode = 0;
+  if (pt.count > 0) {
+    special_mode = pt.sample(this->rand_crypt);
+  }
+  switch (special_mode) {
     case 0:
       item.data1[4] = 0;
       break;
@@ -1498,7 +1581,12 @@ void ItemCreator::generate_weapon_shop_item_bonus1(ItemData& item, size_t player
 
   // Note: The original code shuffles pt and then pops a single value from it. For simplicity, we just sample a single
   // value instead.
-  item.data1[6] = pt.sample(this->rand_crypt);
+  if (pt.count == 0) {
+    item.data1[6] = 0;
+  } else {
+    item.data1[6] = pt.sample(this->rand_crypt);
+  }
+
   if (item.data1[6] == 0) {
     item.data1[7] = 0;
   } else {
@@ -1532,9 +1620,13 @@ void ItemCreator::generate_weapon_shop_item_bonus2(ItemData& item, size_t player
   ProbabilityTable<uint32_t, 100> pt{this->weapon_random_set->bonus_type_table2.at(table_index)};
   pt.shuffle(this->rand_crypt);
 
-  do {
+  item.data1[8] = 0;
+  while (pt.count > 0) {
     item.data1[8] = pt.pop();
-  } while ((item.data1[8] != 0) && (item.data1[8] == item.data1[6]));
+    if ((item.data1[8] == 0) || (item.data1[8] != item.data1[6])) {
+      break;
+    }
+  }
 
   if (item.data1[8] == 0) {
     item.data1[9] = 0;

@@ -51,7 +51,12 @@ public:
   ItemData base_item_for_specialized_box(uint32_t param4, uint32_t param5, uint32_t param6) const;
 
   std::vector<ItemData> generate_armor_shop_contents(Episode episode, size_t player_level);
-  std::vector<ItemData> generate_tool_shop_contents(size_t player_level);
+  std::vector<ItemData> generate_tool_shop_contents(size_t player_level, bool use_extended_recovery_table = false);
+  // Produces a client-safe tool shop from raw generated contents. Tools and tech disks are separated;
+  // tools are priority-sorted so the most useful ones (Telepipe, Trap Vision, atomizers, higher-grade
+  // mates/fluids) survive any trimming. The total is always capped to the BB tool-shop softlock limit
+  // (18). When apply_limits is true, tech disks are additionally limited (curated layout).
+  static std::vector<ItemData> curate_tool_shop_contents(std::vector<ItemData> raw_contents, bool apply_limits);
   std::vector<ItemData> generate_weapon_shop_contents(size_t player_level);
 
   // This function adjusts the item in-place, and returns the luck value.
@@ -168,7 +173,7 @@ private:
   void generate_armor_shop_units(std::vector<ItemData>& shop, size_t player_level);
 
   static size_t get_table_index_for_tool_shop(size_t player_level);
-  void generate_common_tool_shop_recovery_items(std::vector<ItemData>& shop, size_t player_level);
+  void generate_common_tool_shop_recovery_items(std::vector<ItemData>& shop, size_t player_level, bool use_extended_recovery_table);
   void generate_rare_tool_shop_recovery_items(std::vector<ItemData>& shop, size_t player_level);
   void generate_tool_shop_tech_disks(std::vector<ItemData>& shop, size_t player_level);
 
