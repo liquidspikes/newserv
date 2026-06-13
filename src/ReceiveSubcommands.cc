@@ -5478,10 +5478,9 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
     if (new_attr_value > 100) {
       throw std::runtime_error("bonus value exceeds 100");
     }
-
-    uint32_t payment_item_id = payment_item.id;
-    p->remove_item(payment_item_id, cmd.payment_count, *s->item_stack_limits(c->version()));
-    send_destroy_item_to_lobby(c, payment_item_id, cmd.payment_count);
+    auto removed_payment_item = p->remove_item(
+        payment_item.id, cmd.payment_count, *s->item_stack_limits(c->version()));
+    send_destroy_item_to_lobby(c, removed_payment_item.id, cmd.payment_count);
 
     // Re-resolve the weapon reference since it may have shifted in the inventory array
     size_t new_item_index = p->inventory.find_item(cmd.item_id);
