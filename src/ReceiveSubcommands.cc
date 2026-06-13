@@ -5479,14 +5479,19 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
       throw std::runtime_error("bonus value exceeds 100");
     }
 
-    p->remove_item(payment_item.id, cmd.payment_count, *s->item_stack_limits(c->version()));
-    send_destroy_item_to_lobby(c, payment_item.id, cmd.payment_count);
+    uint32_t payment_item_id = payment_item.id;
+    p->remove_item(payment_item_id, cmd.payment_count, *s->item_stack_limits(c->version()));
+    send_destroy_item_to_lobby(c, payment_item_id, cmd.payment_count);
 
-    item.data1[attribute_index] = cmd.attribute;
-    item.data1[attribute_index + 1] = new_attr_value;
+    // Re-resolve the weapon reference since it may have shifted in the inventory array
+    size_t new_item_index = p->inventory.find_item(cmd.item_id);
+    auto& new_item = p->inventory.items[new_item_index].data;
 
-    send_destroy_item_to_lobby(c, item.id, 1);
-    send_create_inventory_item_to_lobby(c, c->lobby_client_id, item);
+    new_item.data1[attribute_index] = cmd.attribute;
+    new_item.data1[attribute_index + 1] = new_attr_value;
+
+    send_destroy_item_to_lobby(c, new_item.id, 1);
+    send_create_inventory_item_to_lobby(c, c->lobby_client_id, new_item);
     send_quest_function_call(c, cmd.success_label);
 
   } catch (const std::exception& e) {
