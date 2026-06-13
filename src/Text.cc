@@ -257,8 +257,24 @@ std::string TextTranscoderUTF8ToCustomSJIS::on_untranslatable(const void** src, 
   }
 }
 
+TextTranscoderUTF8To8859Lossy::TextTranscoderUTF8To8859Lossy() : TextTranscoder("ISO-8859-1", "UTF-8") {}
+
+std::string TextTranscoderUTF8To8859Lossy::on_untranslatable(const void** src, size_t* size) const {
+  try {
+    decode_utf8_char(src, size);
+    return "?";
+  } catch (const std::runtime_error&) {
+    if (*size > 0) {
+      *src = reinterpret_cast<const char*>(*src) + 1;
+      (*size)--;
+    }
+    return "?";
+  }
+}
+
 TextTranscoder tt_8859_to_utf8("UTF-8", "ISO-8859-1");
 TextTranscoder tt_utf8_to_8859("ISO-8859-1", "UTF-8");
+TextTranscoderUTF8To8859Lossy tt_utf8_to_8859_lossy;
 TextTranscoder tt_standard_sjis_to_utf8("UTF-8", "SHIFT_JIS");
 TextTranscoder tt_utf8_to_standard_sjis("SHIFT_JIS", "UTF-8");
 TextTranscoderCustomSJISToUTF8 tt_sega_sjis_to_utf8;
@@ -276,11 +292,11 @@ std::string tt_encode_marked_optional(const std::string& utf8, Language default_
       try {
         return tt_utf8_to_sega_sjis(utf8);
       } catch (const std::exception& e) {
-        return "\tE" + tt_utf8_to_8859(utf8);
+        return "\tE" + tt_utf8_to_8859_lossy(utf8);
       }
     } else {
       try {
-        return tt_utf8_to_8859(utf8);
+        return tt_utf8_to_8859_lossy(utf8);
       } catch (const std::exception& e) {
         return "\tJ" + tt_utf8_to_sega_sjis(utf8);
       }
@@ -299,11 +315,11 @@ std::string tt_encode_marked(const std::string& utf8, Language default_language,
       try {
         return "\tJ" + tt_utf8_to_sega_sjis(utf8);
       } catch (const std::exception& e) {
-        return "\tE" + tt_utf8_to_8859(utf8);
+        return "\tE" + tt_utf8_to_8859_lossy(utf8);
       }
     } else {
       try {
-        return "\tE" + tt_utf8_to_8859(utf8);
+        return "\tE" + tt_utf8_to_8859_lossy(utf8);
       } catch (const std::exception& e) {
         return "\tJ" + tt_utf8_to_sega_sjis(utf8);
       }
