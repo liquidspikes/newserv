@@ -2513,16 +2513,43 @@ static void on_open_shop_bb_or_ep3_battle_subs(std::shared_ptr<Client> c, Subcom
     const auto& cmd = msg.check_size_t<G_ShopContentsRequest_BB_6xB5>();
     auto s = c->require_server_state();
     size_t level = c->character_file()->disp.stats.level + 1;
+
+    // Gameplay constraints for BB shop layouts, applied only when BBShopItemLimits
+    // is enabled (see config.json). These limits are lower than or equal to the
+    // network buffer capacity (G_ShopContents_BB_6xB6::item_datas); the buffer
+    // itself is always enforced separately in send_shop, regardless of this flag.
+    static constexpr size_t MAX_WEAPON_SHOP_ITEMS = 16;
+    static constexpr size_t MAX_ARMOR_SHOP_ITEMS = decltype(G_ShopContents_BB_6xB6::item_datas)::size();
+
     switch (cmd.shop_type) {
       case 0:
-        c->bb_shop_contents[0] = l->item_creator->generate_tool_shop_contents(level);
+        if (s->bb_shop_item_limits_enabled) {
+          // Extended tool shop: draw from the extended recovery table (every tool at every bracket) and
+          // curate it down to a client-safe layout. curate_tool_shop_contents priority-sorts tools
+          // (Telepipe/Trap Vision kept first) and caps the shop at the BB tool-shop softlock limit (18).
+          auto raw_contents = l->item_creator->generate_tool_shop_contents(level, true);
+          c->bb_shop_contents[0] = ItemCreator::curate_tool_shop_contents(std::move(raw_contents), true);
+        } else {
+          // Default: vanilla newserv tool shop, unchanged.
+          c->bb_shop_contents[0] = l->item_creator->generate_tool_shop_contents(level);
+        }
         break;
       case 1:
         c->bb_shop_contents[1] = l->item_creator->generate_weapon_shop_contents(level);
+        // Note: Under normal configuration, generate_weapon_shop_contents generates at most
+        // MAX_WEAPON_SHOP_ITEMS (16) items, so this resize is a redundant safety measure.
+        if (s->bb_shop_item_limits_enabled && c->bb_shop_contents[1].size() > MAX_WEAPON_SHOP_ITEMS) {
+          c->bb_shop_contents[1].resize(MAX_WEAPON_SHOP_ITEMS);
+        }
         break;
       case 2: {
         Episode episode = episode_for_area(l->area_for_floor(c->version(), 0));
         c->bb_shop_contents[2] = l->item_creator->generate_armor_shop_contents(episode, level);
+        // Note: Under normal configuration, generate_armor_shop_contents generates at most
+        // MAX_ARMOR_SHOP_ITEMS (20) items, so this resize is a redundant safety measure.
+        if (s->bb_shop_item_limits_enabled && c->bb_shop_contents[2].size() > MAX_ARMOR_SHOP_ITEMS) {
+          c->bb_shop_contents[2].resize(MAX_ARMOR_SHOP_ITEMS);
+        }
         break;
       }
       default:

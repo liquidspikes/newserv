@@ -91,6 +91,11 @@ struct ToolShopRandomSet : ShopRandomSetBase {
   static const std::array<uint8_t, 0x13> tech_num_map;
 
   std::vector<std::vector<uint8_t>> common_recovery_table;
+  // Optional alternate common-recovery table used only by the extended tool shop (BBShopItemLimits).
+  // It offers every recovery tool at every level bracket; the extended shop then curates that down to
+  // a client-safe layout. When empty (e.g. loaded from a binary .rel that has no such table), the
+  // extended shop falls back to common_recovery_table.
+  std::vector<std::vector<uint8_t>> extended_common_recovery_table;
   std::vector<std::vector<IntPairT<uint8_t>>> rare_recovery_table;
   std::vector<std::vector<IntPairT<uint8_t>>> tech_disk_table;
   std::vector<std::vector<TechDiskLevelEntry>> tech_disk_level_table;
