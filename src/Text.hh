@@ -77,8 +77,18 @@ protected:
   virtual std::string on_untranslatable(const void** src, size_t* size) const;
 };
 
+class TextTranscoderUTF8To8859Lossy : public TextTranscoder {
+public:
+  TextTranscoderUTF8To8859Lossy();
+  virtual ~TextTranscoderUTF8To8859Lossy() = default;
+
+protected:
+  virtual std::string on_untranslatable(const void** src, size_t* size) const;
+};
+
 extern TextTranscoder tt_8859_to_utf8;
 extern TextTranscoder tt_utf8_to_8859;
+extern TextTranscoderUTF8To8859Lossy tt_utf8_to_8859_lossy;
 extern TextTranscoder tt_standard_sjis_to_utf8;
 extern TextTranscoder tt_utf8_to_standard_sjis;
 extern TextTranscoderCustomSJISToUTF8 tt_sega_sjis_to_utf8;
@@ -574,12 +584,12 @@ struct pstring {
             } catch (const std::runtime_error&) {
               this->data[0] = '\t';
               this->data[1] = 'E';
-              auto ret = tt_utf8_to_8859(this->data + 2, Bytes - 2, s.data(), s.size(), true);
+              auto ret = tt_utf8_to_8859_lossy(this->data + 2, Bytes - 2, s.data(), s.size(), true);
               this->clear_after_bytes(ret.bytes_written + 2);
             }
           } else {
             try {
-              auto ret = tt_utf8_to_8859(this->data, Bytes, s.data(), s.size(), true);
+              auto ret = tt_utf8_to_8859_lossy(this->data, Bytes, s.data(), s.size(), true);
               this->clear_after_bytes(ret.bytes_written);
             } catch (const std::runtime_error&) {
               this->data[0] = '\t';
