@@ -585,7 +585,6 @@ std::shared_ptr<PSOBBCharacterFile> PSOBBCharacterFile::create_from_file(const P
     dest_item.data.decode_for_version(Version::DC_NTE);
     dest_item.amount = dest_item.data.get_tool_item_amount(ItemData::StackLimits::DEFAULT_STACK_LIMITS_DC_NTE);
   }
-  ret->bank.decode_from_client(Version::DC_V1);
   ret->guild_card = src.guild_card;
   return ret;
 }
@@ -613,7 +612,6 @@ std::shared_ptr<PSOBBCharacterFile> PSOBBCharacterFile::create_from_file(const P
     dest_item.data.decode_for_version(Version::DC_NTE);
     dest_item.amount = dest_item.data.get_tool_item_amount(ItemData::StackLimits::DEFAULT_STACK_LIMITS_DC_NTE);
   }
-  ret->bank.decode_from_client(Version::DC_V1);
   ret->guild_card = src.guild_card;
   for (size_t z = 0; z < std::min<size_t>(ret->symbol_chats.size(), src.symbol_chats.size()); z++) {
     auto& ret_sc = ret->symbol_chats[z];
@@ -1176,9 +1174,9 @@ void PSOBBCharacterFile::add_item(const ItemData& item, const ItemData::StackLim
     return;
   }
 
-  // Handle combinable items
-  size_t combine_max = item.max_stack_size(limits);
-  if (combine_max > 1) {
+  // Handle stackable items
+  size_t max_stack_size = item.max_stack_size(limits);
+  if (max_stack_size > 1) {
     // Get the item index if there's already a stack of the same item in the player's inventory
     size_t y;
     for (y = 0; y < this->inventory.num_items; y++) {
@@ -1190,7 +1188,7 @@ void PSOBBCharacterFile::add_item(const ItemData& item, const ItemData::StackLim
     // If we found an existing stack, add it to the total and return
     if (y < this->inventory.num_items) {
       size_t new_stack_size = this->inventory.items[y].data.data1[5] + item.data1[5];
-      if (new_stack_size > combine_max) {
+      if (new_stack_size > max_stack_size) {
         throw std::out_of_range("stack is too large");
       }
       this->inventory.items[y].data.data1[5] = new_stack_size;
@@ -1198,7 +1196,7 @@ void PSOBBCharacterFile::add_item(const ItemData& item, const ItemData::StackLim
     }
   }
 
-  // If we get here, then it's not meseta and not a combine item, so it needs to go into an empty inventory slot
+  // If we get here, then it's not meseta and not stackable, so it needs to go into an empty inventory slot
   if (this->inventory.num_items >= 30) {
     throw std::out_of_range("inventory is full");
   }
@@ -1211,36 +1209,40 @@ void PSOBBCharacterFile::add_item(const ItemData& item, const ItemData::StackLim
 }
 
 // TODO: Eliminate code duplication between this function and the parallel function in PlayerBankT
-ItemData PSOBBCharacterFile::remove_item(uint32_t item_id, uint32_t amount, const ItemData::StackLimits& limits) {
+std::pair<ItemData, bool> PSOBBCharacterFile::remove_item(
+    uint32_t item_id, uint32_t amount, const ItemData::StackLimits& limits) {
   ItemData ret;
 
-  // If we're removing meseta (signaled by an invalid item ID), then create a meseta item.
+  // If we're removing meseta (signaled by an invalid item ID), create a meseta item. This always counts as splitting a
+  // stack.
   if (item_id == 0xFFFFFFFF) {
     this->remove_meseta(amount, !is_v4(limits.version));
     ret.data1[0] = 0x04;
     ret.data2d = amount;
-    return ret;
+    return {ret, true};
   }
 
   size_t index = this->inventory.find_item(item_id);
   auto& inventory_item = this->inventory.items[index];
   bool is_equipped = (inventory_item.flags & 0x00000008);
 
-  // If the item is a combine item and are we removing less than we have of it, then create a new item and reduce the
-  // amount of the existing stack. Note that passing amount == 0 means to remove the entire stack, so this only applies
-  // if amount is nonzero.
-  if (amount && (inventory_item.data.stack_size(limits) > 1) && (amount < inventory_item.data.data1[5])) {
+  // If the item is stackable and are we removing less than we have of it, then create a new item and reduce the amount
+  // of the existing stack. Note that passing amount == 0 means to remove the entire stack, so this only applies if
+  // amount is nonzero.
+  size_t stack_size = inventory_item.data.stack_size(limits);
+  if (amount && (amount < stack_size)) {
     if (is_equipped) {
-      throw std::runtime_error("character has a combine item equipped");
+      throw std::runtime_error("character has a stackable item equipped");
     }
     ret = inventory_item.data;
     ret.data1[5] = amount;
-    ret.id = 0xFFFFFFFF;
     inventory_item.data.data1[5] -= amount;
-    return ret;
+    return {ret, true};
+  } else if (amount > stack_size) {
+    throw std::runtime_error("Requested stack size is larger than existing stack size");
   }
 
-  // If we get here, then it's not meseta, and either it's not a combine item or we're removing the entire stack.
+  // If we get here, then it's not meseta, and either it's not a stackable item or we're removing the entire stack.
   // Delete the item from the inventory slot and return the deleted item.
   if (is_equipped) {
     this->inventory.unequip_item_index(index);
@@ -1260,7 +1262,7 @@ ItemData PSOBBCharacterFile::remove_item(uint32_t item_id, uint32_t amount, cons
   last_item.unknown_a1 = 0;
   last_item.flags = 0;
   last_item.data.clear();
-  return ret;
+  return {ret, false};
 }
 
 void PSOBBCharacterFile::add_meseta(uint32_t amount) {

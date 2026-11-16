@@ -66,8 +66,9 @@ struct SubcommandDefinition {
     ALWAYS_FORWARD_TO_WATCHERS = 0x01,
     ALLOW_FORWARD_TO_WATCHED_LOBBY = 0x02,
   };
-  uint8_t nte_subcommand;
-  uint8_t proto_subcommand;
+  uint8_t dc_nte_subcommand;
+  uint8_t dc_11_2000_subcommand;
+  uint8_t gc_nte_subcommand;
   uint8_t final_subcommand;
   SubcommandHandler handler;
   uint8_t flags = 0;
@@ -77,28 +78,36 @@ using SDF = SubcommandDefinition::Flag;
 extern const std::vector<SubcommandDefinition> subcommand_definitions;
 
 struct ProtoSubcommandIndex {
-  std::array<const SubcommandDefinition*, 0x100> nte_defs;
-  std::array<const SubcommandDefinition*, 0x100> proto_defs;
+  std::array<const SubcommandDefinition*, 0x100> dc_nte_defs;
+  std::array<const SubcommandDefinition*, 0x100> dc_11_2000_defs;
+  std::array<const SubcommandDefinition*, 0x100> gc_nte_defs;
   std::array<const SubcommandDefinition*, 0x100> final_defs;
 };
 
 ProtoSubcommandIndex generate_proto_subcommand_index() {
   ProtoSubcommandIndex ret;
-  ret.nte_defs.fill(nullptr);
-  ret.proto_defs.fill(nullptr);
+  ret.dc_nte_defs.fill(nullptr);
+  ret.dc_11_2000_defs.fill(nullptr);
+  ret.gc_nte_defs.fill(nullptr);
   ret.final_defs.fill(nullptr);
   for (const auto& def : subcommand_definitions) {
-    if (def.nte_subcommand != 0x00) {
-      if (ret.nte_defs[def.nte_subcommand]) {
-        throw std::logic_error("multiple subcommand definitions map to the same NTE subcommand");
+    if (def.dc_nte_subcommand != 0x00) {
+      if (ret.dc_nte_defs[def.dc_nte_subcommand]) {
+        throw std::logic_error("multiple subcommand definitions map to the same DC NTE subcommand");
       }
-      ret.nte_defs[def.nte_subcommand] = &def;
+      ret.dc_nte_defs[def.dc_nte_subcommand] = &def;
     }
-    if (def.proto_subcommand != 0x00) {
-      if (ret.proto_defs[def.proto_subcommand]) {
-        throw std::logic_error("multiple subcommand definitions map to the same 11/2000 subcommand");
+    if (def.dc_11_2000_subcommand != 0x00) {
+      if (ret.dc_11_2000_defs[def.dc_11_2000_subcommand]) {
+        throw std::logic_error("multiple subcommand definitions map to the same DC 11/2000 subcommand");
       }
-      ret.proto_defs[def.proto_subcommand] = &def;
+      ret.dc_11_2000_defs[def.dc_11_2000_subcommand] = &def;
+    }
+    if (def.gc_nte_subcommand != 0x00) {
+      if (ret.gc_nte_defs[def.gc_nte_subcommand]) {
+        throw std::logic_error("multiple subcommand definitions map to the same GC NTE subcommand");
+      }
+      ret.gc_nte_defs[def.gc_nte_subcommand] = &def;
     }
     if (def.final_subcommand != 0x00) {
       if (ret.final_defs[def.final_subcommand]) {
@@ -113,9 +122,11 @@ ProtoSubcommandIndex generate_proto_subcommand_index() {
 const SubcommandDefinition* def_for_subcommand(Version version, uint8_t subcommand) {
   static const auto index = generate_proto_subcommand_index();
   if (version == Version::DC_NTE) {
-    return index.nte_defs[subcommand];
+    return index.dc_nte_defs[subcommand];
   } else if (version == Version::DC_11_2000) {
-    return index.proto_defs[subcommand];
+    return index.dc_11_2000_defs[subcommand];
+  } else if (version == Version::GC_NTE) {
+    return index.gc_nte_defs[subcommand];
   } else {
     return index.final_defs[subcommand];
   }
@@ -126,9 +137,11 @@ uint8_t translate_subcommand_number(Version to_version, Version from_version, ui
   if (!def) {
     return 0x00;
   } else if (to_version == Version::DC_NTE) {
-    return def->nte_subcommand;
+    return def->dc_nte_subcommand;
   } else if (to_version == Version::DC_11_2000) {
-    return def->proto_subcommand;
+    return def->dc_11_2000_subcommand;
+  } else if (to_version == Version::GC_NTE) {
+    return def->gc_nte_subcommand;
   } else {
     return def->final_subcommand;
   }
@@ -155,8 +168,9 @@ static void forward_subcommand(std::shared_ptr<Client> c, SubcommandMessage& msg
   const auto* def = def_for_subcommand(c->version(), header.subcommand);
   uint8_t def_flags = def ? def->flags : 0;
 
-  std::string nte_data;
-  std::string proto_data;
+  std::string dc_nte_data;
+  std::string dc_11_2000_data;
+  std::string gc_nte_data;
   std::string final_data;
   Version c_version = c->version();
   auto send_to_client = [&](std::shared_ptr<Client> lc) -> void {
@@ -167,22 +181,31 @@ static void forward_subcommand(std::shared_ptr<Client> c, SubcommandMessage& msg
       data_to_send = msg.data;
       size_to_send = msg.size;
     } else if (lc->version() == Version::DC_NTE) {
-      if (def && def->nte_subcommand) {
-        if (nte_data.empty()) {
-          nte_data.assign(reinterpret_cast<const char*>(msg.data), msg.size);
-          nte_data[0] = def->nte_subcommand;
+      if (def && def->dc_nte_subcommand) {
+        if (dc_nte_data.empty()) {
+          dc_nte_data.assign(reinterpret_cast<const char*>(msg.data), msg.size);
+          dc_nte_data[0] = def->dc_nte_subcommand;
         }
-        data_to_send = nte_data.data();
-        size_to_send = nte_data.size();
+        data_to_send = dc_nte_data.data();
+        size_to_send = dc_nte_data.size();
       }
     } else if (lc->version() == Version::DC_11_2000) {
-      if (def && def->proto_subcommand) {
-        if (proto_data.empty()) {
-          proto_data.assign(reinterpret_cast<const char*>(msg.data), msg.size);
-          proto_data[0] = def->proto_subcommand;
+      if (def && def->dc_11_2000_subcommand) {
+        if (dc_11_2000_data.empty()) {
+          dc_11_2000_data.assign(reinterpret_cast<const char*>(msg.data), msg.size);
+          dc_11_2000_data[0] = def->dc_11_2000_subcommand;
         }
-        data_to_send = proto_data.data();
-        size_to_send = proto_data.size();
+        data_to_send = dc_11_2000_data.data();
+        size_to_send = dc_11_2000_data.size();
+      }
+    } else if (lc->version() == Version::GC_NTE) {
+      if (def && def->gc_nte_subcommand) {
+        if (gc_nte_data.empty()) {
+          gc_nte_data.assign(reinterpret_cast<const char*>(msg.data), msg.size);
+          gc_nte_data[0] = def->gc_nte_subcommand;
+        }
+        data_to_send = gc_nte_data.data();
+        size_to_send = gc_nte_data.size();
       }
     } else {
       if (def && def->final_subcommand) {
@@ -465,7 +488,7 @@ void forward_subcommand_with_entity_targets_transcode_and_track_hits_t(
             entity_id = res.entity_id;
           }
           if (entity_id != 0xFFFF) {
-            out_targets.emplace_back(TargetEntry{entity_id, targets[z].unknown_a2});
+            out_targets.emplace_back(TargetEntry{entity_id, targets[z].hitbox_index});
           }
         }
         size_t out_size = sizeof(HeaderT) + sizeof(TargetEntry) * out_targets.size();
@@ -506,7 +529,7 @@ static void on_sync_joining_player_compressed_state(std::shared_ptr<Client> c, S
   size_t compressed_size;
   const void* compressed_data;
   if (is_pre_v1(c->version())) {
-    const auto& cmd = msg.check_size_t<G_SyncGameStateHeader_DCNTE_6x6B_6x6C_6x6D_6x6E>(0xFFFF);
+    const auto& cmd = msg.check_size_t<G_SyncGameStateHeader_DCProtos_6x6B_6x6C_6x6D_6x6E>(0xFFFF);
     orig_subcommand_number = cmd.header.basic_header.subcommand;
     decompressed_size = cmd.decompressed_size;
     compressed_size = msg.size - sizeof(cmd);
@@ -563,8 +586,9 @@ static void on_sync_joining_player_compressed_state(std::shared_ptr<Client> c, S
             compressed_data,
             compressed_size,
             decompressed_size,
-            subcommand_def->nte_subcommand,
-            subcommand_def->proto_subcommand,
+            subcommand_def->dc_nte_subcommand,
+            subcommand_def->dc_11_2000_subcommand,
+            subcommand_def->gc_nte_subcommand,
             subcommand_def->final_subcommand);
       } else {
         send_game_enemy_state(target);
@@ -584,8 +608,9 @@ static void on_sync_joining_player_compressed_state(std::shared_ptr<Client> c, S
             compressed_data,
             compressed_size,
             decompressed_size,
-            subcommand_def->nte_subcommand,
-            subcommand_def->proto_subcommand,
+            subcommand_def->dc_nte_subcommand,
+            subcommand_def->dc_11_2000_subcommand,
+            subcommand_def->gc_nte_subcommand,
             subcommand_def->final_subcommand);
       } else {
         send_game_object_state(target);
@@ -700,8 +725,9 @@ static void on_sync_joining_player_compressed_state(std::shared_ptr<Client> c, S
             compressed_data,
             compressed_size,
             decompressed_size,
-            subcommand_def->nte_subcommand,
-            subcommand_def->proto_subcommand,
+            subcommand_def->dc_nte_subcommand,
+            subcommand_def->dc_11_2000_subcommand,
+            subcommand_def->gc_nte_subcommand,
             subcommand_def->final_subcommand);
       } else {
         send_game_set_state(target);
@@ -807,7 +833,7 @@ Parsed6x70Data::Parsed6x70Data(
       language(Language::JAPANESE),
       player_tag(0x00010000),
       guild_card_number(guild_card_number),
-      unknown_a6(0),
+      battle_enabled(0),
       battle_team_number(0),
       telepipe(cmd.telepipe),
       death_flags(cmd.death_flags),
@@ -843,7 +869,7 @@ Parsed6x70Data::Parsed6x70Data(
       language(language),
       player_tag(0x00010000),
       guild_card_number(guild_card_number),
-      unknown_a6(0),
+      battle_enabled(0),
       battle_team_number(0),
       telepipe(cmd.telepipe),
       death_flags(cmd.death_flags),
@@ -932,7 +958,7 @@ G_SyncPlayerDispAndInventory_DCNTE_6x70 Parsed6x70Data::as_dc_nte(std::shared_pt
   G_SyncPlayerDispAndInventory_DCNTE_6x70 ret;
   ret.base = this->base;
   ret.unknown_a5 = this->unknown_a5_nte;
-  ret.unknown_a6 = this->unknown_a6;
+  ret.unknown_a6 = this->unknown_a6_nte;
   ret.telepipe = this->telepipe;
   ret.death_flags = this->death_flags;
   ret.hold_state = this->hold_state;
@@ -1121,7 +1147,7 @@ Parsed6x70Data::Parsed6x70Data(
       language(static_cast<Language>(base.language32.load())),
       player_tag(base.player_tag),
       guild_card_number(guild_card_number), // Ignore the client's GC#
-      unknown_a6(base.unknown_a6),
+      battle_enabled(base.battle_enabled),
       battle_team_number(base.battle_team_number),
       telepipe(base.telepipe),
       death_flags(base.death_flags),
@@ -1144,7 +1170,7 @@ G_6x70_Base_V1 Parsed6x70Data::base_v1(bool is_v3) const {
   ret.language32 = static_cast<size_t>(this->language);
   ret.player_tag = this->player_tag;
   ret.guild_card_number = this->guild_card_number;
-  ret.unknown_a6 = this->unknown_a6;
+  ret.battle_enabled = this->battle_enabled;
   ret.battle_team_number = this->battle_team_number;
   ret.telepipe = this->telepipe;
   ret.death_flags = this->death_flags;
@@ -1159,7 +1185,7 @@ uint32_t Parsed6x70Data::convert_player_flags(uint32_t player_flags, bool to_v3)
   // The format of player_flags was changed significantly between v2 and v3, and not accounting for this results in odd
   // effects like other characters not appearing when joining a game. Unfortunately, some bits were deleted on v3 and
   // other bits were added, so it doesn't suffice to simply store the most complete format of this field - we have to
-  // be able to convert between the two. What's known about these bits (? indicates meaning/behavior is unverified):
+  // be able to convert between the two. What's known about these bits:
   //   V1/V2    V3/V4
   //   00000001 00000001 = player hold is set (see notes on 6x2C and 6x2D in CommandFormats.hh)
   //   00000002 00000002 = player hold is set for the purpose of dropping an item
@@ -1179,9 +1205,9 @@ uint32_t Parsed6x70Data::convert_player_flags(uint32_t player_flags, bool to_v3)
   //   00008000 00001000 = cannot use telepipe / Ryuker (e.g. boss warps set this flag when the player is nearby)
   //   00010000 00002000 = unknown (TODO: appears to be entirely unused, at least in v3)
   //   00020000 00004000 = is teleporting as a result of 6x24 (set only briefly after appearing at destination)
-  //   00040000 00008000 = is dead NPC (set by e.g. npc_crptalk_id when regsA[4] == 1)
+  //   00040000 00008000 = is dead NPC (set by e.g. npc_crptalk_id when initial_state == 1)
   //   00080000 -------- = unknown (TODO: appears to be entirely unused, at least in v2)
-  //   00100000 00010000 = has permanent trap vision (e.g. is android)
+  //   00100000 00010000 = has trap vision (set permanently for androids, or temporarily after a Trap Vision is used)
   //   00200000 00020000 = equipped items are invisible / intangible (e.g. in Pioneer 2)
   //   00400000 00040000 = is loading / changing floors (set by 6x22 and at game join, cleared by 6x23)
   //   00800000 00080000 = player data is in the process of being exported to save file format
@@ -1350,7 +1376,7 @@ static void on_ep3_battle_subs(std::shared_ptr<Client> c, SubcommandMessage& msg
 
   auto s = c->require_server_state();
   auto l = c->require_lobby();
-  if (!l->is_game() || !l->is_ep3()) {
+  if (!l->is_game() || !l->is_ep3() || !l->ep3_server) {
     return;
   }
 
@@ -1368,13 +1394,42 @@ static void on_ep3_battle_subs(std::shared_ptr<Client> c, SubcommandMessage& msg
     if (cmd.client_id >= 12) {
       return;
     }
+  } else if (header.subsubcommand == 0x2F) {
+    const Ep3CounterPlayerEntryTrial* entry;
+    uint8_t menu_item_index;
+    if (c->version() == Version::GC_EP3_NTE) {
+      const auto& cmd = msg.check_size_t<G_SetDeckInBattleSetupMenu_Ep3NTE_6xB5x2F>();
+      if (cmd.menu_type >= 0x15) {
+        return;
+      }
+      entry = &cmd.entry;
+      menu_item_index = cmd.menu_item_index;
+    } else {
+      const auto& cmd = msg.check_size_t<G_SetDeckInBattleSetupMenu_Ep3_6xB5x2F>();
+      if (cmd.menu_type >= 0x15) {
+        return;
+      }
+      entry = &cmd.entry;
+      menu_item_index = cmd.menu_item_index;
+    }
+    uint8_t slot_index = menu_item_index - (menu_item_index > 2);
+    if (entry->entry_state == 0) {
+      l->ep3_server->clear_counter_slot(slot_index);
+    } else if (entry->entry_type == 2) {
+      l->ep3_server->set_counter_slot_com(slot_index);
+    } else {
+      l->ep3_server->set_counter_slot_human(slot_index, entry->owner_client_id);
+    }
   } else if (header.subsubcommand == 0x31) {
     const auto& cmd = msg.check_size_t<G_ConfirmDeckSelection_Ep3_6xB5x31>();
     if (cmd.menu_type >= 0x15) {
       return;
     }
+    if ((cmd.action < 2) && (cmd.target_client_id >= 4)) {
+      return;
+    }
   } else if (header.subsubcommand == 0x32) {
-    const auto& cmd = msg.check_size_t<G_MoveSharedMenuCursor_Ep3_6xB5x32>();
+    const auto& cmd = msg.check_size_t<G_SyncSharedMenuState_Ep3_6xB5x32>();
     if (cmd.menu_type >= 0x15) {
       return;
     }
@@ -1938,7 +1993,10 @@ static void on_player_drop_item(std::shared_ptr<Client> c, SubcommandMessage& ms
   auto s = c->require_server_state();
   auto l = c->require_lobby();
   auto p = c->character_file();
-  auto item = p->remove_item(cmd.item_id, 0, *s->data->item_stack_limits(c->version()));
+  auto [item, stack_was_split] = p->remove_item(cmd.item_id, 0, *s->data->item_stack_limits(c->version()));
+  if (stack_was_split) {
+    throw std::logic_error("Stack should not be split when entire stack was dropped");
+  }
   l->add_item(cmd.floor, item, cmd.pos, nullptr, nullptr, 0x00F);
 
   if (l->log.should_log(phosg::LogLevel::L_INFO)) {
@@ -2063,11 +2121,10 @@ static void on_drop_partial_stack_bb(std::shared_ptr<Client> c, SubcommandMessag
   auto s = c->require_server_state();
   auto p = c->character_file();
   const auto& limits = *s->data->item_stack_limits(c->version());
-  auto item = p->remove_item(cmd.item_id, cmd.amount, limits);
+  auto [item, stack_was_split] = p->remove_item(cmd.item_id, cmd.amount, limits);
 
-  // If a stack was split, the original item still exists, so the dropped item needs a new ID. remove_item signals this
-  // by returning an item with an ID of 0xFFFFFFFF.
-  if (item.id == 0xFFFFFFFF) {
+  // If a stack was split, the original item still exists (or it was Meseta), so the dropped item needs a new ID
+  if (stack_was_split) {
     item.id = l->generate_item_id(c->lobby_client_id);
   }
 
@@ -2466,36 +2523,6 @@ static void on_xbox_voice_chat_control(std::shared_ptr<Client> c, SubcommandMess
   }
 }
 
-static void on_gc_nte_exclusive(std::shared_ptr<Client> c, SubcommandMessage& msg) {
-  auto can_participate = [&](Version vers) {
-    return (!is_v1_or_v2(vers) || (vers == Version::GC_NTE));
-  };
-  if (!can_participate(c->version())) {
-    return;
-  }
-
-  // Command should not be forwarded across the GC NTE boundary, but may be forwarded to other clients within that
-  // boundary
-  bool c_is_nte = (c->version() == Version::GC_NTE);
-
-  auto l = c->require_lobby();
-  if (command_is_private(msg.command)) {
-    if (msg.flag >= l->max_clients) {
-      return;
-    }
-    auto lc = l->clients[msg.flag];
-    if (lc && can_participate(lc->version()) && ((lc->version() == Version::GC_NTE) == c_is_nte)) {
-      send_command(lc, msg.command, msg.flag, msg.data, msg.size);
-    }
-  } else {
-    for (auto& lc : l->clients) {
-      if (lc && (lc != c) && can_participate(lc->version()) && ((lc->version() == Version::GC_NTE) == c_is_nte)) {
-        send_command(lc, msg.command, msg.flag, msg.data, msg.size);
-      }
-    }
-  }
-}
-
 static void on_open_shop_bb_or_ep3_battle_subs(std::shared_ptr<Client> c, SubcommandMessage& msg) {
   auto l = c->require_lobby();
   if (!l->is_game()) {
@@ -2665,14 +2692,19 @@ static void on_ep3_private_word_select_bb_bank_action(std::shared_ptr<Client> c,
 
       } else { // Deposit item
         const auto& limits = *s->data->item_stack_limits(c->version());
-        auto item = p->remove_item(cmd.item_id, cmd.item_amount, limits);
+        auto [item, stack_was_split] = p->remove_item(cmd.item_id, cmd.item_amount, limits);
         // If a stack was split, the bank item retains the same item ID as the inventory item. This is annoying but
         // doesn't cause any problems because we always generate a new item ID when withdrawing from the bank, so
         // there's no chance of conflict later.
-        if (item.id == 0xFFFFFFFF) {
+        if (stack_was_split) {
           item.id = cmd.item_id;
         }
-        bank->add_item(item, limits);
+        try {
+          bank->add_item(item, limits);
+        } catch (const std::exception& e) {
+          p->add_item(item, limits);
+          throw;
+        }
         send_destroy_item_to_lobby(c, cmd.item_id, cmd.item_amount, true);
 
         if (l->log.should_log(phosg::LogLevel::L_INFO)) {
@@ -2700,9 +2732,14 @@ static void on_ep3_private_word_select_bb_bank_action(std::shared_ptr<Client> c,
 
       } else { // Take item
         const auto& limits = *s->data->item_stack_limits(c->version());
-        auto item = bank->remove_item(cmd.item_id, cmd.item_amount, limits);
+        auto [item, _] = bank->remove_item(cmd.item_id, cmd.item_amount, limits);
         item.id = l->generate_item_id(c->lobby_client_id);
-        p->add_item(item, limits);
+        try {
+          p->add_item(item, limits);
+        } catch (const std::exception& e) {
+          bank->add_item(item, limits);
+          throw;
+        }
         send_create_inventory_item_to_lobby(c, c->lobby_client_id, item);
 
         if (l->log.should_log(phosg::LogLevel::L_INFO)) {
@@ -2800,7 +2837,7 @@ G_SpecializableItemDropRequest_6xA2 normalize_drop_request(const void* data, siz
 
 DropReconcileResult reconcile_drop_request_with_map(
     std::shared_ptr<Client> c,
-    G_SpecializableItemDropRequest_6xA2& cmd,
+    const G_SpecializableItemDropRequest_6xA2& cmd,
     Difficulty difficulty,
     uint8_t event,
     std::shared_ptr<MapState> map,
@@ -2809,9 +2846,6 @@ DropReconcileResult reconcile_drop_request_with_map(
   bool is_box = (cmd.rt_index == 0x30);
 
   DropReconcileResult res;
-  res.effective_enemy_type = EnemyType::UNKNOWN;
-  res.should_drop = true;
-  res.ignore_def = (cmd.ignore_def != 0);
   if (!map) {
     return res;
   }
@@ -2825,27 +2859,50 @@ DropReconcileResult reconcile_drop_request_with_map(
     if (!set_entry) {
       throw std::runtime_error("object set entry is missing");
     }
+    res.effective_area = map->floor_to_area.at(res.obj_st->super_obj->floor);
     std::string type_name = MapFile::name_for_object_type(set_entry->base_type, version);
-    c->log.info_f("Drop check for K-{:03X} {} {}",
-        res.obj_st->k_id,
-        res.ignore_def ? 'G' : 'S',
-        type_name);
+    if (c->log.should_log(phosg::LogLevel::L_INFO)) {
+      c->log.info_f("Drop check for K-{:03X} {} (area {:02X})", res.obj_st->k_id, set_entry->str(), res.effective_area);
+    }
+
     if (cmd.floor != res.obj_st->super_obj->floor) {
       c->log.warning_f("Floor {:02X} from command does not match object\'s expected floor {:02X}",
           cmd.floor, res.obj_st->super_obj->floor);
     }
-    if (is_v1_or_v2(version) && (version != Version::GC_NTE)) {
-      // V1/V2 don't have 6xA2, so we can't get ignore_def or the object parameters from the client on those versions
-      cmd.param3 = set_entry->param3;
-      cmd.param4 = set_entry->param4;
-      cmd.param5 = set_entry->param5;
-      cmd.param6 = set_entry->param6;
+
+    // Check ignore_def against client's value
+    if ((set_entry->base_type == 0x0092) || (set_entry->base_type == 0x0161) || (set_entry->base_type == 0x0203)) {
+      // TObjContainerBase, TOContainerAncientItemCommon, and TObjContainerJungEx specialize if param1 <= 0
+      res.ignore_def = (set_entry->param1 > 0.0);
+      c->log.info_f("Object is TObjContainerBase/TOContainerAncientItemCommon; ignore_def={}", res.ignore_def);
+    } else if (set_entry->base_type == 0x038D) { // __DESERT_CRYSTALS_BOX__ specializes if (int)param1 == 2
+      res.ignore_def = (floor(set_entry->param1) != 2.0);
+      c->log.info_f("Object is __DESERT_CRYSTALS_BOX__; ignore_def={}", res.ignore_def);
+    } else { // All other objects are not specializable
+      res.ignore_def = true;
+      c->log.info_f("Object is not specializable; ignore_def=true");
     }
-    bool object_ignore_def = (set_entry->param1 > 0.0);
-    if (res.ignore_def != object_ignore_def) {
-      c->log.info_f("ignore_def value {} from command does not match object\'s expected ignore_def {} (from p1={:g})",
-          res.ignore_def ? "true" : "false", object_ignore_def ? "true" : "false", set_entry->param1);
+    if ((cmd.ignore_def != 0) != res.ignore_def) {
+      c->log.info_f("ignore_def value {} from client does not match expected ignore_def", res.ignore_def);
     }
+
+    // We don't trust the client's param values; we read them from the map instead. But we warn if the client tries any
+    // shenanigans by sending incorrect params
+    if (!is_v1_or_v2(version) || (version == Version::GC_NTE)) {
+      if (cmd.param3 != set_entry->param3) {
+        c->log.warning_f("Client param3 {:g} does not match map param3 {:g}", cmd.param3, set_entry->param3);
+      }
+      if (cmd.param4 != set_entry->param4) {
+        c->log.warning_f("Client param4 {:08X} does not match map param4 {:08X}", cmd.param4, set_entry->param4);
+      }
+      if (cmd.param5 != set_entry->param5) {
+        c->log.warning_f("Client param5 {:08X} does not match map param5 {:08X}", cmd.param5, set_entry->param5);
+      }
+      if (cmd.param6 != set_entry->param6) {
+        c->log.warning_f("Client param6 {:08X} does not match map param6 {:08X}", cmd.param6, set_entry->param6);
+      }
+    }
+
     if (c->check_flag(Client::Flag::DEBUG_ENABLED)) {
       std::string type_name = MapFile::name_for_object_type(set_entry->base_type, version);
       send_text_message_fmt(c, "$C5K-{:03X} {} {}", res.obj_st->k_id, res.ignore_def ? 'G' : 'S', type_name);
@@ -2854,10 +2911,10 @@ DropReconcileResult reconcile_drop_request_with_map(
   } else {
     res.ref_ene_st = map->enemy_state_for_index(version, cmd.floor, cmd.entity_index);
     res.target_ene_st = res.ref_ene_st->alias_target_ene_st ? res.ref_ene_st->alias_target_ene_st : res.ref_ene_st;
-    uint8_t area = map->floor_to_area.at(res.target_ene_st->super_ene->floor);
-    res.effective_enemy_type = res.target_ene_st->type(version, area, difficulty, event);
-    c->log.info_f("Drop check for E-{:03X} (target E-{:03X}, type {})",
-        res.ref_ene_st->e_id, res.target_ene_st->e_id, phosg::name_for_enum(res.effective_enemy_type));
+    res.effective_area = map->floor_to_area.at(res.target_ene_st->super_ene->floor);
+    res.effective_enemy_type = res.target_ene_st->type(version, res.effective_area, difficulty, event);
+    c->log.info_f("Drop check for E-{:03X} (target E-{:03X}, type {}, area {:02X})",
+        res.ref_ene_st->e_id, res.target_ene_st->e_id, phosg::name_for_enum(res.effective_enemy_type), res.effective_area);
     uint8_t expected_rt_index = type_definition_for_enemy(res.effective_enemy_type).rt_index;
     bool mismatched_rt_index = false;
     if (cmd.rt_index != expected_rt_index) {
@@ -2950,21 +3007,29 @@ static void on_entity_drop_item_request(std::shared_ptr<Client> c, SubcommandMes
     auto generate_item_for_client = [&](std::shared_ptr<Client> c) -> ItemCreator::DropResult {
       bool force_rare = c->check_flag(Client::Flag::ALL_RARES_ENABLED);
       if (rec.obj_st) {
-        if (rec.ignore_def) {
+        if (!rec.obj_st->super_obj) {
+          throw std::runtime_error(std::format("Object {:04X} has no super object", cmd.entity_index));
+        } else if (rec.ignore_def) {
           l->log.info_f("Creating item from box {:04X} => K-{:03X} (area {:02X})",
-              cmd.entity_index, rec.obj_st->k_id, cmd.effective_area);
-          return l->item_creator->on_box_item_drop(cmd.effective_area, force_rare);
+              cmd.entity_index, rec.obj_st->k_id, rec.effective_area);
+          return l->item_creator->on_box_item_drop(rec.effective_area, force_rare);
         } else {
-          l->log.info_f(
-              "Creating item from box {:04X} => K-{:03X} (area {:02X}; specialized with {:g} {:08X} {:08X} {:08X})",
-              cmd.entity_index, rec.obj_st->k_id, cmd.effective_area, cmd.param3, cmd.param4, cmd.param5, cmd.param6);
-          return l->item_creator->on_specialized_box_item_drop(
-              cmd.effective_area, cmd.param3, cmd.param4, cmd.param5, cmd.param6);
+          const auto* def = rec.obj_st->super_obj->version(c->version()).set_entry;
+          if (!def) {
+            throw std::runtime_error(std::format("No set entry is available for this object"));
+          } else {
+            l->log.info_f(
+                "Creating item from box {:04X} => K-{:03X} (area {:02X}; specialized with {:g} {:08X} {:08X} {:08X})",
+                cmd.entity_index, rec.obj_st->k_id, rec.effective_area, def->param3, def->param4, def->param5,
+                def->param6);
+            return l->item_creator->on_specialized_box_item_drop(
+                rec.effective_area, def->param3, def->param4, def->param5, def->param6);
+          }
         }
       } else if (rec.target_ene_st) {
         l->log.info_f("Creating item from enemy {:04X} => E-{:03X} (area {:02X})",
-            cmd.entity_index, rec.target_ene_st->e_id, cmd.effective_area);
-        return l->item_creator->on_monster_item_drop(rec.effective_enemy_type, cmd.effective_area, force_rare);
+            cmd.entity_index, rec.target_ene_st->e_id, rec.effective_area);
+        return l->item_creator->on_monster_item_drop(rec.effective_enemy_type, rec.effective_area, force_rare);
       } else {
         throw std::runtime_error("neither object nor enemy were present");
       }
@@ -2991,7 +3056,7 @@ static void on_entity_drop_item_request(std::shared_ptr<Client> c, SubcommandMes
           l->log.info_f("No item was created");
         } else {
           std::string name = s->data->describe_item(c->version(), res.item);
-          l->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, cmd.effective_area, name);
+          l->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, rec.effective_area, name);
           if (drop_mode == ServerDropMode::SERVER_DUPLICATE) {
             for (const auto& lc : l->clients) {
               if (lc && (rec.obj_st || (lc->floor == cmd.floor))) {
@@ -3029,7 +3094,7 @@ static void on_entity_drop_item_request(std::shared_ptr<Client> c, SubcommandMes
               l->log.info_f("No item was created for {}", lc->channel->name);
             } else {
               std::string name = s->data->describe_item(lc->version(), res.item);
-              l->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, cmd.effective_area, name);
+              l->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, rec.effective_area, name);
               res.item.id = l->generate_item_id(0xFF);
               l->log.info_f("Creating item {:08X} at {:02X}:{:g},{:g} for {}",
                   res.item.id, cmd.floor, cmd.pos.x, cmd.pos.z, lc->channel->name);
@@ -3510,7 +3575,7 @@ static void on_incr_enemy_damage(std::shared_ptr<Client> c, SubcommandMessage& m
     c->log.info_f("Claiming last hit on E-{:03X}", ene_st->e_id);
     ene_st->set_last_hit_by_client_id(c->lobby_client_id);
   }
-  ene_st->total_damage = std::min<uint32_t>(ene_st->total_damage + cmd.hit_amount, cmd.max_hp);
+  ene_st->total_damage = std::clamp<int32_t>(ene_st->total_damage + cmd.hit_amount, 0, cmd.max_hp);
   if (ene_st->alias_target_ene_st) {
     if (cmd.hit_amount > 0) {
       c->log.info_f("Claiming last hit on E-{:03X} (alias of E-{:03X})",
@@ -3677,7 +3742,7 @@ static void on_dragon_actions_6x12(std::shared_ptr<Client> c, SubcommandMessage&
   }
 
   G_DragonBossActions_GC_6x12 sw_cmd = {{cmd.header.subcommand, cmd.header.size, cmd.header.entity_id.load()},
-      cmd.phase.load(), cmd.unknown_a3.load(), cmd.target_client_id.load(), cmd.x.load(), cmd.z.load()};
+      cmd.phase.load(), cmd.attack_seq_index.load(), cmd.target_client_id.load(), cmd.x.load(), cmd.z.load()};
   bool sender_is_be = is_big_endian(c->version());
   for (auto lc : l->clients) {
     if (lc && (lc != c)) {
@@ -3697,14 +3762,37 @@ static void on_dragon_actions_6x12(std::shared_ptr<Client> c, SubcommandMessage&
 }
 
 static void on_gol_dragon_actions(std::shared_ptr<Client> c, SubcommandMessage& msg) {
-  auto& cmd = msg.check_size_t<G_GolDragonBossActions_XB_BB_6xA8>();
-
   if (command_is_private(msg.command)) {
     return;
   }
   auto l = c->require_lobby();
   if (!l->is_game()) {
     return;
+  }
+
+  G_GolDragonBossActions_XB_BB_6xA8 cmd;
+  cmd.header.subcommand = 0xA8;
+  cmd.header.size = sizeof(cmd) >> 2;
+  if (c->version() == Version::GC_NTE) {
+    auto& c_cmd = msg.check_size_t<G_GolDragonBossActionsWithPosition_GCNTE_6xAA>();
+    cmd.header.entity_id = c_cmd.header.entity_id;
+    cmd.phase = c_cmd.phase;
+    cmd.attack_seq_index = c_cmd.attack_seq_index;
+    cmd.target_client_id = c_cmd.target_client_id;
+    cmd.x = c_cmd.x;
+    cmd.z = c_cmd.z;
+    cmd.attack_variant = 0;
+  } else if (is_big_endian(c->version())) {
+    auto& c_cmd = msg.check_size_t<G_GolDragonBossActions_GC_6xA8>();
+    cmd.header.entity_id = c_cmd.header.entity_id;
+    cmd.phase = c_cmd.phase;
+    cmd.attack_seq_index = c_cmd.attack_seq_index;
+    cmd.target_client_id = c_cmd.target_client_id;
+    cmd.x = c_cmd.x;
+    cmd.z = c_cmd.z;
+    cmd.attack_variant = c_cmd.attack_variant;
+  } else {
+    cmd = msg.check_size_t<G_GolDragonBossActions_XB_BB_6xA8>();
   }
 
   auto ene_st = l->map_state->enemy_state_for_index(c->version(), cmd.header.entity_id - 0x1000);
@@ -3715,26 +3803,25 @@ static void on_gol_dragon_actions(std::shared_ptr<Client> c, SubcommandMessage& 
     throw std::runtime_error("GOL_DRAGON enemy is an alias");
   }
 
-  G_GolDragonBossActions_GC_6xA8 sw_cmd = {{cmd.header.subcommand, cmd.header.size, cmd.header.entity_id},
+  G_GolDragonBossActions_GC_6xA8 gc_cmd{{cmd.header.subcommand, cmd.header.size, cmd.header.entity_id},
       cmd.phase.load(),
-      cmd.unknown_a3.load(),
+      cmd.attack_seq_index.load(),
       cmd.target_client_id.load(),
       cmd.x.load(),
       cmd.z.load(),
-      cmd.unknown_a5,
+      cmd.attack_variant,
       0};
-  bool sender_is_be = is_big_endian(c->version());
   for (auto lc : l->clients) {
     if (lc && (lc != c)) {
-      if (is_big_endian(lc->version()) == sender_is_be) {
-        cmd.header.entity_id = 0x1000 | l->map_state->index_for_enemy_state(lc->version(), ene_st);
-        if (cmd.header.entity_id != 0xFFFF) {
+      uint16_t entity_id = 0x1000 | l->map_state->index_for_enemy_state(lc->version(), ene_st);
+      if (entity_id != 0xFFFF) {
+        if (is_big_endian(lc->version())) {
+          gc_cmd.header.subcommand = (lc->version() == Version::GC_NTE) ? 0xAA : 0xA8;
+          gc_cmd.header.entity_id = entity_id;
+          send_command_t(lc, 0x60, 0x00, gc_cmd);
+        } else {
+          cmd.header.entity_id = entity_id;
           send_command_t(lc, 0x60, 0x00, cmd);
-        }
-      } else {
-        sw_cmd.header.entity_id = 0x1000 | l->map_state->index_for_enemy_state(lc->version(), ene_st);
-        if (sw_cmd.header.entity_id != 0xFFFF) {
-          send_command_t(lc, 0x60, 0x00, sw_cmd);
         }
       }
     }
@@ -3795,8 +3882,8 @@ static void on_set_entity_pos_and_angle_6x17(std::shared_ptr<Client> c, Subcomma
   forward_subcommand_with_entity_id_transcode_t<G_SetEntityPositionAndAngle_6x17>(c, msg);
 }
 
-static void on_set_boss_warp_flags_6x6A(std::shared_ptr<Client> c, SubcommandMessage& msg) {
-  auto& cmd = msg.check_size_t<G_SetBossWarpFlags_6x6A>();
+static void on_set_boss_warp_state_6x6A(std::shared_ptr<Client> c, SubcommandMessage& msg) {
+  auto& cmd = msg.check_size_t<G_SetBossWarpState_6x6A>();
 
   if (command_is_private(msg.command)) {
     return;
@@ -3821,7 +3908,7 @@ static void on_set_boss_warp_flags_6x6A(std::shared_ptr<Client> c, SubcommandMes
     throw std::runtime_error("incorrect object type for 6x6A command");
   }
 
-  forward_subcommand_with_entity_id_transcode_t<G_SetBossWarpFlags_6x6A>(c, msg);
+  forward_subcommand_with_entity_id_transcode_t<G_SetBossWarpState_6x6A>(c, msg);
 }
 
 static void on_charge_attack_bb(std::shared_ptr<Client> c, SubcommandMessage& msg) {
@@ -4060,6 +4147,28 @@ static void on_steal_exp_bb(std::shared_ptr<Client> c, SubcommandMessage& msg) {
   add_player_exp(c, stolen_exp, cmd.enemy_index | 0x1000);
 }
 
+// The enemy types whose defeat is the defeat of a boss (counted once per fight in the kill counts). The other boss types
+// are phases or parts of a fight.
+static bool is_boss_main_form(EnemyType type) {
+  switch (type) {
+    case EnemyType::DRAGON:
+    case EnemyType::DE_ROL_LE:
+    case EnemyType::VOL_OPT_2:
+    case EnemyType::DARK_FALZ_2: // Dark Falz's final form on Normal
+    case EnemyType::DARK_FALZ_3: // ... and on the other difficulties
+    case EnemyType::BARBA_RAY:
+    case EnemyType::GOL_DRAGON:
+    case EnemyType::GAL_GRYPHON:
+    case EnemyType::OLGA_FLOW_2:
+    case EnemyType::SAINT_MILION:
+    case EnemyType::SHAMBERTIN:
+    case EnemyType::KONDRIEU:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static void on_enemy_exp_request_bb(std::shared_ptr<Client> c, SubcommandMessage& msg) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
@@ -4108,6 +4217,37 @@ static void on_enemy_exp_request_bb(std::shared_ptr<Client> c, SubcommandMessage
   uint8_t area = l->area_for_floor(c->version(), ene_st->super_ene->floor);
   Episode episode = episode_for_area(area);
   auto type = ene_st->type(c->version(), area, l->difficulty, l->event);
+
+  // Count the kill for the player who killed the enemy (reported in /y/clients for external tools). Reaching this
+  // point means this player has not yet been given full EXP for this enemy, so each kill is counted once. A boss counts
+  // once per fight, when its main form falls: its phases, joints, body parts, mines, monitors and spinners are parts
+  // of the fight, and some bosses are several entities of the same type (Saint-Milion, Shambertin and so Kondrieu
+  // have nine body entities; Barba Ray has two).
+  if (cmd.is_killer && ene_st->last_hit_by_client_id(c->lobby_client_id)) {
+    bool count_kill = true;
+    if (type_definition_for_enemy(type).is_boss()) {
+      count_kill = is_boss_main_form(type);
+      if (count_kill) {
+        uint64_t fight_key = (static_cast<uint64_t>(ene_st->super_ene->floor) << 32) | ene_st->super_ene->super_set_id;
+        uint8_t& counted = l->map_state->boss_kills_counted[fight_key];
+        uint8_t client_bit = 1 << c->lobby_client_id;
+        count_kill = !(counted & client_bit);
+        counted |= client_bit;
+      }
+    }
+    if (count_kill) {
+      bool is_rare = ene_st->is_rare(c->version());
+      c->enemy_kill_count++;
+      if (is_rare) {
+        c->rare_enemy_kill_count++;
+        c->last_rare_enemy_killed = phosg::name_for_enum(type);
+      }
+      auto& entry = c->kill_counts[std::make_tuple(episode, l->difficulty, l->mode, type)];
+      entry.count++;
+      entry.rare = entry.rare || is_rare;
+    }
+  }
+
   double base_exp = base_exp_for_enemy_type(
       s->data->battle_params, l->quest, type, episode, l->difficulty, ene_st->super_ene->floor, l->mode == GameMode::SOLO);
 
@@ -4292,7 +4432,7 @@ static void on_transfer_item_via_mail_message_bb(std::shared_ptr<Client> c, Subc
   auto s = c->require_server_state();
   auto p = c->character_file();
   const auto& limits = *s->data->item_stack_limits(c->version());
-  auto item = p->remove_item(cmd.item_id, cmd.amount, limits);
+  auto [item, _] = p->remove_item(cmd.item_id, cmd.amount, limits);
 
   if (l->log.should_log(phosg::LogLevel::L_INFO)) {
     auto name = s->data->describe_item(c->version(), item);
@@ -4353,7 +4493,7 @@ static void on_exchange_item_for_team_points_bb(std::shared_ptr<Client> c, Subco
   auto s = c->require_server_state();
   auto p = c->character_file();
   const auto& limits = *s->data->item_stack_limits(c->version());
-  auto item = p->remove_item(cmd.item_id, cmd.amount, limits);
+  auto [item, _] = p->remove_item(cmd.item_id, cmd.amount, limits);
   size_t amount = item.stack_size(limits);
 
   size_t points = s->data->item_parameter_table(Version::BB_V4)->get_item_team_points(item);
@@ -4388,7 +4528,7 @@ static void on_destroy_inventory_item(std::shared_ptr<Client> c, SubcommandMessa
 
   auto s = c->require_server_state();
   auto p = c->character_file();
-  auto item = p->remove_item(cmd.item_id, cmd.amount, *s->data->item_stack_limits(c->version()));
+  auto [item, _] = p->remove_item(cmd.item_id, cmd.amount, *s->data->item_stack_limits(c->version()));
 
   if (l->log.should_log(phosg::LogLevel::L_INFO)) {
     auto name = s->data->describe_item(c->version(), item);
@@ -4543,7 +4683,11 @@ static void on_sell_item_at_shop_bb(std::shared_ptr<Client> c, SubcommandMessage
 
   auto s = c->require_server_state();
   auto p = c->character_file();
-  auto item = p->remove_item(cmd.item_id, cmd.amount, *s->data->item_stack_limits(c->version()));
+  auto& stack_limits = *s->data->item_stack_limits(c->version());
+  auto [item, _] = p->remove_item(cmd.item_id, cmd.amount, stack_limits);
+  if (item.stack_size(stack_limits) != cmd.amount) {
+    throw std::runtime_error("Invalid stack size at sale time");
+  }
   size_t price = (s->data->item_parameter_table(c->version())->price_for_item(item) >> 3) * cmd.amount;
   p->add_meseta(price);
 
@@ -4925,6 +5069,39 @@ static void on_challenge_update_records(std::shared_ptr<Client> c, SubcommandMes
   }
 }
 
+static void on_set_challenge_time_6x95(std::shared_ptr<Client> c, SubcommandMessage& msg) {
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    return;
+  }
+
+  // Count a stage clear for the player whose time this is, for /y/clients (ChallengeClearCount and
+  // LastChallengeClear). Each clear is counted once per player, even if more than one client reports it.
+  if (l->mode == GameMode::CHALLENGE) {
+    const auto& cmd = msg.check_size_t<G_SetChallengeTime_6x95>();
+    uint32_t seconds = cmd.challenge_time.has_value() ? cmd.challenge_time.decode() : 0;
+    auto target = (cmd.client_id < l->max_clients) ? l->clients[cmd.client_id] : nullptr;
+    if (target && (seconds > 0) && (seconds < 0xFFFF)) {
+      int64_t quest_number = l->quest ? static_cast<int64_t>(l->quest->meta.quest_number) : -1;
+      uint8_t stage_number = l->challenge_params ? l->challenge_params->stage_number : 0;
+      bool is_repeat = (target->challenge_clear_count > 0) &&
+          (target->last_challenge_clear_lobby_id == l->lobby_id) &&
+          (target->last_challenge_clear_quest_number == quest_number) &&
+          (target->last_challenge_clear_stage_number == stage_number) &&
+          (target->last_challenge_clear_seconds == seconds);
+      if (!is_repeat) {
+        target->challenge_clear_count++;
+        target->last_challenge_clear_quest_number = quest_number;
+        target->last_challenge_clear_stage_number = stage_number;
+        target->last_challenge_clear_seconds = seconds;
+        target->last_challenge_clear_lobby_id = l->lobby_id;
+      }
+    }
+  }
+
+  forward_subcommand(c, msg);
+}
+
 static void on_update_battle_data_6x7D(std::shared_ptr<Client> c, SubcommandMessage& msg) {
   auto l = c->lobby.lock();
   if (!l) {
@@ -4955,27 +5132,35 @@ static void on_quest_exchange_item_bb(std::shared_ptr<Client> c, SubcommandMessa
   const auto& cmd = msg.check_size_t<G_QuestExchangeItem_BB_6xD5>();
   auto s = c->require_server_state();
 
+  auto p = c->character_file();
+  const auto& limits = *s->data->item_stack_limits(c->version());
+
+  ItemData new_item = cmd.replace_item;
+  assert_quest_item_create_allowed(l, new_item);
+  new_item.enforce_stack_size_limits(limits);
+
+  ItemData removed_payment_item;
+  bool exchange_failed = false;
   try {
-    auto p = c->character_file();
-    const auto& limits = *s->data->item_stack_limits(c->version());
-
-    ItemData new_item = cmd.replace_item;
-    assert_quest_item_create_allowed(l, new_item);
-    new_item.enforce_stack_size_limits(limits);
-
     size_t found_index = p->inventory.find_item_by_primary_identifier(cmd.find_item.primary_identifier());
-    auto found_item = p->remove_item(p->inventory.items[found_index].data.id, 1, limits);
-    send_destroy_item_to_lobby(c, found_item.id, 1);
-
+    removed_payment_item = p->remove_item(p->inventory.items[found_index].data.id, 1, limits).first;
     new_item.id = l->generate_item_id(c->lobby_client_id);
     p->add_item(new_item, limits);
-    send_create_inventory_item_to_lobby(c, c->lobby_client_id, new_item);
-
-    send_quest_function_call(c, cmd.success_label);
 
   } catch (const std::exception& e) {
     c->log.warning_f("Quest item exchange failed: {}", e.what());
+    if (!removed_payment_item.empty()) {
+      p->add_item(removed_payment_item, limits);
+    }
+    exchange_failed = true;
+  }
+
+  if (exchange_failed) {
     send_quest_function_call(c, cmd.failure_label);
+  } else {
+    send_destroy_item_to_lobby(c, removed_payment_item.id, 1);
+    send_create_inventory_item_to_lobby(c, c->lobby_client_id, new_item);
+    send_quest_function_call(c, cmd.success_label);
   }
 }
 
@@ -4992,7 +5177,7 @@ static void on_wrap_item_bb(std::shared_ptr<Client> c, SubcommandMessage& msg) {
   auto s = c->require_server_state();
 
   auto p = c->character_file();
-  auto item = p->remove_item(cmd.item.id, 1, *s->data->item_stack_limits(c->version()));
+  auto [item, _] = p->remove_item(cmd.item.id, 1, *s->data->item_stack_limits(c->version()));
   send_destroy_item_to_lobby(c, item.id, 1);
   item.wrap(*s->data->item_stack_limits(c->version()), cmd.present_color);
   p->add_item(item, *s->data->item_stack_limits(c->version()));
@@ -5020,7 +5205,7 @@ static void on_photon_drop_exchange_for_item_bb(std::shared_ptr<Client> c, Subco
     new_item.enforce_stack_size_limits(limits);
 
     size_t found_index = p->inventory.find_item_by_primary_identifier(0x03100000);
-    auto found_item = p->remove_item(p->inventory.items[found_index].data.id, 0, limits);
+    auto [found_item, _] = p->remove_item(p->inventory.items[found_index].data.id, 0, limits);
     send_destroy_item_to_lobby(c, found_item.id, found_item.stack_size(limits));
 
     new_item.id = l->generate_item_id(c->lobby_client_id);
@@ -5062,10 +5247,14 @@ static void on_photon_drop_exchange_for_s_rank_special_bb(std::shared_ptr<Client
       }
     }
 
-    auto payment_item = p->remove_item(p->inventory.items[payment_item_index].data.id, cost, limits);
+    auto [payment_item, _1] = p->remove_item(p->inventory.items[payment_item_index].data.id, cost, limits);
     send_destroy_item_to_lobby(c, payment_item.id, cost);
 
-    auto item = p->remove_item(cmd.item_id, 1, limits);
+    auto [item, item_stack_was_split] = p->remove_item(cmd.item_id, 1, limits);
+    if (item_stack_was_split) {
+      // This should never happen unless the player is cheating; punish them by losing both the PD(s) and the weapon
+      throw std::runtime_error("Stackable weapon used in PD exchange");
+    }
     send_destroy_item_to_lobby(c, item.id, cost);
     item.data1[2] = cmd.special_type;
     p->add_item(item, limits);
@@ -5146,12 +5335,17 @@ static void on_secret_lottery_ticket_exchange_bb(std::shared_ptr<Client> c, Subc
 
     uint32_t slt_item_id = p->inventory.items[currency_index].data.id;
 
-    // Note: It seems Sega used 6xDB here; we use 6x29 instead.
-    p->remove_item(slt_item_id, 1, limits);
-    send_destroy_item_to_lobby(c, slt_item_id, 1);
+    auto [removed_payment_item, _] = p->remove_item(slt_item_id, 1, limits);
+    try {
+      item.id = l->generate_item_id(c->lobby_client_id);
+      p->add_item(item, limits);
+    } catch (const std::runtime_error&) {
+      p->add_item(removed_payment_item, limits);
+      throw;
+    }
 
-    item.id = l->generate_item_id(c->lobby_client_id);
-    p->add_item(item, limits);
+    // Note: It seems Sega used 6xDB here; we use 6x29 instead.
+    send_destroy_item_to_lobby(c, slt_item_id, 1);
     send_create_inventory_item_to_lobby(c, c->lobby_client_id, item);
   }
 
@@ -5174,7 +5368,7 @@ static void on_photon_crystal_exchange_bb(std::shared_ptr<Client> c, SubcommandM
   auto s = c->require_server_state();
   auto p = c->character_file();
   size_t index = p->inventory.find_item_by_primary_identifier(0x03100200);
-  auto item = p->remove_item(p->inventory.items[index].data.id, 1, *s->data->item_stack_limits(c->version()));
+  auto [item, _] = p->remove_item(p->inventory.items[index].data.id, 1, *s->data->item_stack_limits(c->version()));
   send_destroy_item_to_lobby(c, item.id, 1);
   l->drop_mode = ServerDropMode::DISABLED;
   l->allowed_drop_modes = (1 << static_cast<uint8_t>(l->drop_mode)); // DISABLED only
@@ -5256,18 +5450,12 @@ static void on_quest_F95F_result_bb(std::shared_ptr<Client> c, SubcommandMessage
 
   const auto& limits = *s->data->item_stack_limits(c->version());
 
-  bool failed = false;
-  ItemData ticket_item;
-  try {
-    size_t index = p->inventory.find_item_by_primary_identifier(0x03100400); // Photon Ticket
-    ticket_item = p->remove_item(p->inventory.items[index].data.id, result.first, limits);
-  } catch (const std::out_of_range&) {
-    failed = true;
-  }
-  if (failed) {
+  size_t index = p->inventory.find_item_by_primary_identifier(0x03100400); // Photon Ticket
+  if (p->inventory.items[index].data.stack_size(limits) < result.first) {
     send_gallon_plan_result(c, cmd.failure_label, cmd.result_code_reg, 1, cmd.result_index_reg, cmd.result_index);
     return;
   }
+  auto ticket_item = p->remove_item(p->inventory.items[index].data.id, result.first, limits).first;
 
   ItemData new_item = result.second;
   try {
@@ -5275,9 +5463,6 @@ static void on_quest_F95F_result_bb(std::shared_ptr<Client> c, SubcommandMessage
     new_item.id = l->generate_item_id(c->lobby_client_id);
     p->add_item(new_item, limits);
   } catch (const std::out_of_range&) {
-    failed = true;
-  }
-  if (failed) {
     p->add_item(ticket_item, limits);
     send_gallon_plan_result(c, cmd.failure_label, cmd.result_code_reg, 2, cmd.result_index_reg, cmd.result_index);
     return;
@@ -5402,7 +5587,7 @@ static void on_momoka_item_exchange_bb(std::shared_ptr<Client> c, SubcommandMess
   ItemData found_item;
   try {
     size_t found_index = p->inventory.find_item_by_primary_identifier(cmd.find_item.primary_identifier());
-    found_item = p->remove_item(p->inventory.items[found_index].data.id, 1, limits);
+    found_item = p->remove_item(p->inventory.items[found_index].data.id, 1, limits).first;
   } catch (const std::out_of_range& e) {
     failed = true;
   }
@@ -5445,9 +5630,8 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
   auto s = c->require_server_state();
   auto p = c->character_file();
   try {
-    size_t item_index = p->inventory.find_item(cmd.item_id);
-    auto& item = p->inventory.items[item_index].data;
-    if (item.is_s_rank_weapon()) {
+    auto* item = &p->inventory.items[p->inventory.find_item(cmd.item_id)].data;
+    if (item->is_s_rank_weapon()) {
       throw std::runtime_error("6xDA command sent for ES weapon");
     }
 
@@ -5458,7 +5642,7 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
       throw std::runtime_error("not enough payment items present");
     }
 
-    int8_t attribute_amount = 0;
+    int16_t attribute_amount = 0;
     if (cmd.payment_type == 1 && cmd.payment_count == 1) {
       attribute_amount = 30;
     } else if (cmd.payment_type == 0 && cmd.payment_count == 4) {
@@ -5470,8 +5654,8 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
     }
 
     size_t attribute_index = 0;
-    for (size_t z = 6; z <= (item.has_kill_count() ? 8 : 10); z += 2) {
-      if ((item.data1[z] == 0) || (!(item.data1[z] & 0x80) && (item.data1[z] == cmd.attribute))) {
+    for (size_t z = 6; z <= (item->has_kill_count() ? 8 : 10); z += 2) {
+      if ((item->data1[z] == 0) || (!(item->data1[z] & 0x80) && (item->data1[z] == cmd.attribute))) {
         attribute_index = z;
         break;
       }
@@ -5479,20 +5663,22 @@ static void on_upgrade_weapon_attribute_bb(std::shared_ptr<Client> c, Subcommand
     if (attribute_index == 0) {
       throw std::runtime_error("no available attribute slots");
     }
-    int8_t new_attr_value = static_cast<int8_t>(item.data1[attribute_index + 1]) + attribute_amount;
+    int16_t new_attr_value = phosg::sign_extend<int16_t, uint8_t>(item->data1[attribute_index + 1]) + attribute_amount;
     if (new_attr_value > 100) {
       throw std::runtime_error("bonus value exceeds 100");
     }
 
-    auto removed_payment_item = p->remove_item(
+    auto [removed_payment_item, _] = p->remove_item(
         payment_item.id, cmd.payment_count, *s->data->item_stack_limits(c->version()));
     send_destroy_item_to_lobby(c, removed_payment_item.id, cmd.payment_count);
 
-    item.data1[attribute_index] = cmd.attribute;
-    item.data1[attribute_index + 1] = new_attr_value;
+    // Look up the item again, because removing the payment item could move the target item in the inventory
+    item = &p->inventory.items[p->inventory.find_item(cmd.item_id)].data;
+    item->data1[attribute_index] = cmd.attribute;
+    item->data1[attribute_index + 1] = new_attr_value;
 
-    send_destroy_item_to_lobby(c, item.id, 1);
-    send_create_inventory_item_to_lobby(c, c->lobby_client_id, item);
+    send_destroy_item_to_lobby(c, item->id, 1);
+    send_create_inventory_item_to_lobby(c, c->lobby_client_id, *item);
     send_quest_function_call(c, cmd.success_label);
 
   } catch (const std::exception& e) {
@@ -5512,264 +5698,264 @@ static void on_write_quest_counter_bb(std::shared_ptr<Client> c, SubcommandMessa
 constexpr uint8_t NONE = 0x00;
 
 const std::vector<SubcommandDefinition> subcommand_definitions{
-    // {DC NTE, 11/2000, all other versions, handler}
-    /* 6x00 */ {0x00, 0x00, 0x00, on_invalid},
-    /* 6x01 */ {0x01, 0x01, 0x01, on_invalid},
-    /* 6x02 */ {0x02, 0x02, 0x02, forward_subcommand},
-    /* 6x03 */ {0x03, 0x03, 0x03, forward_subcommand},
-    /* 6x04 */ {0x04, 0x04, 0x04, forward_subcommand},
-    /* 6x05 */ {0x05, 0x05, 0x05, on_switch_state_changed},
-    /* 6x06 */ {0x06, 0x06, 0x06, on_send_guild_card},
-    /* 6x07 */ {0x07, 0x07, 0x07, on_symbol_chat, SDF::ALWAYS_FORWARD_TO_WATCHERS},
-    /* 6x08 */ {0x08, 0x08, 0x08, on_invalid},
-    /* 6x09 */ {0x09, 0x09, 0x09, on_invalid}, // See notes in CommandFormats.hh
-    /* 6x0A */ {0x0A, 0x0A, 0x0A, on_update_enemy_state},
-    /* 6x0B */ {0x0B, 0x0B, 0x0B, on_update_object_state_t<G_UpdateObjectState_6x0B>},
-    /* 6x0C */ {0x0C, 0x0C, 0x0C, on_received_condition},
-    /* 6x0D */ {NONE, NONE, 0x0D, on_forward_check_game},
-    /* 6x0E */ {NONE, NONE, 0x0E, forward_subcommand_with_entity_id_transcode_t<G_ClearNegativeStatusEffects_6x0E>},
-    /* 6x0F */ {NONE, NONE, 0x0F, on_invalid},
-    /* 6x10 */ {0x0E, 0x0E, 0x10, forward_subcommand_with_entity_id_transcode_t<G_DragonBossActions_6x10_6x11>},
-    /* 6x11 */ {0x0F, 0x0F, 0x11, forward_subcommand_with_entity_id_transcode_t<G_DragonBossActions_6x10_6x11>},
-    /* 6x12 */ {0x10, 0x10, 0x12, on_dragon_actions_6x12},
-    /* 6x13 */ {0x11, 0x11, 0x13, forward_subcommand_with_entity_id_transcode_t<G_DeRolLeBossActions_6x13>},
-    /* 6x14 */ {0x12, 0x12, 0x14, forward_subcommand_with_entity_id_transcode_t<G_DeRolLeBossActionsWithTarget_6x14>},
-    /* 6x15 */ {0x13, 0x13, 0x15, forward_subcommand_with_entity_id_transcode_t<G_VolOptBossActions_6x15>},
-    /* 6x16 */ {0x14, 0x14, 0x16, on_vol_opt_actions_t<G_VolOptBossActions_6x16>},
-    /* 6x17 */ {0x15, 0x15, 0x17, on_set_entity_pos_and_angle_6x17},
-    /* 6x18 */ {0x16, 0x16, 0x18, forward_subcommand_with_entity_id_transcode_t<G_VolOpt2BossActions_6x18>},
-    /* 6x19 */ {0x17, 0x17, 0x19, forward_subcommand_with_entity_id_transcode_t<G_DarkFalzActions_6x19>},
-    /* 6x1A */ {NONE, NONE, 0x1A, on_invalid},
-    /* 6x1B */ {NONE, 0x19, 0x1B, on_forward_check_game},
-    /* 6x1C */ {NONE, 0x1A, 0x1C, on_forward_check_game},
-    /* 6x1D */ {0x19, 0x1B, 0x1D, on_invalid},
-    /* 6x1E */ {0x1A, 0x1C, 0x1E, on_invalid},
-    /* 6x1F */ {0x1B, 0x1D, 0x1F, on_change_floor_6x1F},
-    /* 6x20 */ {0x1C, 0x1E, 0x20, on_movement_xyz_with_floor<G_SetPosition_6x20>},
-    /* 6x21 */ {0x1D, 0x1F, 0x21, on_change_floor_6x21},
-    /* 6x22 */ {0x1E, 0x20, 0x22, on_forward_check_client},
-    /* 6x23 */ {0x1F, 0x21, 0x23, on_set_player_visible},
-    /* 6x24 */ {0x20, 0x22, 0x24, on_movement_xyz<G_TeleportPlayer_6x24>},
-    /* 6x25 */ {0x21, 0x23, 0x25, on_equip_item},
-    /* 6x26 */ {0x22, 0x24, 0x26, on_unequip_item}, // TODO: Why does BB allow this in the lobby?
-    /* 6x27 */ {0x23, 0x25, 0x27, on_use_item},
-    /* 6x28 */ {0x24, 0x26, 0x28, on_feed_mag},
-    /* 6x29 */ {0x25, 0x27, 0x29, on_destroy_inventory_item},
-    /* 6x2A */ {0x26, 0x28, 0x2A, on_player_drop_item},
-    /* 6x2B */ {0x27, 0x29, 0x2B, on_create_inventory_item},
-    /* 6x2C */ {0x28, 0x2A, 0x2C, on_forward_check_client},
-    /* 6x2D */ {0x29, 0x2B, 0x2D, on_forward_check_client},
-    /* 6x2E */ {0x2A, 0x2C, 0x2E, on_forward_check_client},
-    /* 6x2F */ {0x2B, 0x2D, 0x2F, on_change_hp<G_ChangePlayerHP_6x2F>},
-    /* 6x30 */ {0x2C, 0x2E, 0x30, on_level_up},
-    /* 6x31 */ {0x2D, 0x2F, 0x31, on_forward_check_game},
-    /* 6x32 */ {NONE, NONE, 0x32, on_forward_check_game},
-    /* 6x33 */ {0x2E, 0x30, 0x33, on_forward_check_game},
-    /* 6x34 */ {0x2F, 0x31, 0x34, on_forward_check_game},
-    /* 6x35 */ {0x30, NONE, 0x35, on_invalid},
-    /* 6x36 */ {0x31, 0x32, 0x36, on_forward_check_game},
-    /* 6x37 */ {0x32, 0x33, 0x37, on_forward_check_game},
-    /* 6x38 */ {NONE, 0x34, 0x38, on_forward_check_game},
-    /* NONE */ {0x33, 0x35, NONE, on_forward_check_game},
-    /* 6x39 */ {NONE, 0x36, 0x39, on_forward_check_game},
-    /* 6x3A */ {NONE, 0x37, 0x3A, on_forward_check_game},
-    /* 6x3B */ {NONE, 0x38, 0x3B, forward_subcommand},
-    /* 6x3C */ {0x34, 0x39, 0x3C, forward_subcommand},
-    /* 6x3D */ {0x35, 0x3A, 0x3D, on_invalid},
-    /* 6x3E */ {NONE, NONE, 0x3E, on_movement_xyz_with_floor<G_StopAtPosition_6x3E>},
-    /* 6x3F */ {0x36, 0x3B, 0x3F, on_movement_xyz_with_floor<G_SetPosition_6x3F>},
-    /* 6x40 */ {0x37, 0x3C, 0x40, on_movement_xz<G_WalkToPosition_6x40>},
-    /* 6x41 */ {0x38, 0x3D, 0x41, on_movement_xz<G_MoveToPosition_6x41_6x42>},
-    /* 6x42 */ {0x39, 0x3E, 0x42, on_movement_xz<G_MoveToPosition_6x41_6x42>},
-    /* 6x43 */ {0x3A, 0x3F, 0x43, on_forward_check_game_client},
-    /* 6x44 */ {0x3B, 0x40, 0x44, on_forward_check_game_client},
-    /* 6x45 */ {0x3C, 0x41, 0x45, on_forward_check_game_client},
-    /* 6x46 */ {NONE, 0x42, 0x46, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_AttackFinished_Header_6x46>},
-    /* 6x47 */ {0x3D, 0x43, 0x47, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_CastTechnique_Header_6x47>},
-    /* 6x48 */ {NONE, NONE, 0x48, on_cast_technique_finished},
-    /* 6x49 */ {0x3E, 0x44, 0x49, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_ExecutePhotonBlast_Header_6x49>},
-    /* 6x4A */ {0x3F, 0x45, 0x4A, on_change_hp<G_ClientIDHeader>},
-    /* 6x4B */ {0x40, 0x46, 0x4B, on_change_hp<G_ClientIDHeader>},
-    /* 6x4C */ {0x41, 0x47, 0x4C, on_change_hp<G_ClientIDHeader>},
-    /* 6x4D */ {0x42, 0x48, 0x4D, on_player_died},
-    /* 6x4E */ {NONE, NONE, 0x4E, on_player_revivable},
-    /* 6x4F */ {0x43, 0x49, 0x4F, on_player_revived},
-    /* 6x50 */ {0x44, 0x4A, 0x50, on_forward_check_game_client},
-    /* 6x51 */ {0x45, 0x4B, 0x51, on_invalid},
-    /* 6x52 */ {0x46, 0x4C, 0x52, on_set_animation_state},
-    /* 6x53 */ {0x47, 0x4D, 0x53, on_forward_check_game},
-    /* 6x54 */ {0x48, 0x4E, 0x54, forward_subcommand},
-    /* 6x55 */ {0x49, 0x4F, 0x55, on_movement_xyz<G_IntraMapWarp_6x55>},
-    /* 6x56 */ {0x4A, 0x50, 0x56, on_movement_xyz<G_SetPlayerPositionAndAngle_6x56>},
-    /* 6x57 */ {NONE, 0x51, 0x57, on_forward_check_client},
-    /* 6x58 */ {NONE, NONE, 0x58, on_forward_check_client},
-    /* 6x59 */ {0x4B, 0x52, 0x59, on_pick_up_item},
-    /* 6x5A */ {0x4C, 0x53, 0x5A, on_pick_up_item_request},
-    /* 6x5B */ {0x4D, 0x54, 0x5B, forward_subcommand},
-    /* 6x5C */ {0x4E, 0x55, 0x5C, on_destroy_floor_item},
-    /* 6x5D */ {0x4F, 0x56, 0x5D, on_drop_partial_stack},
-    /* 6x5E */ {0x50, 0x57, 0x5E, on_buy_shop_item},
-    /* 6x5F */ {0x51, 0x58, 0x5F, on_box_or_enemy_item_drop},
-    /* 6x60 */ {0x52, 0x59, 0x60, on_entity_drop_item_request},
-    /* 6x61 */ {0x53, 0x5A, 0x61, on_forward_check_game},
-    /* 6x62 */ {0x54, 0x5B, 0x62, on_forward_check_game},
-    /* 6x63 */ {0x55, 0x5C, 0x63, on_destroy_floor_item},
-    /* 6x64 */ {0x56, 0x5D, 0x64, on_forward_check_game},
-    /* 6x65 */ {0x57, 0x5E, 0x65, on_forward_check_game},
-    /* 6x66 */ {NONE, NONE, 0x66, on_forward_check_game},
-    /* 6x67 */ {0x58, 0x5F, 0x67, on_trigger_set_event},
-    /* 6x68 */ {0x59, 0x60, 0x68, on_update_telepipe_state},
-    /* 6x69 */ {0x5A, 0x61, 0x69, on_npc_control},
-    /* 6x6A */ {0x5B, 0x62, 0x6A, on_set_boss_warp_flags_6x6A},
-    /* 6x6B */ {0x5C, 0x63, 0x6B, on_sync_joining_player_compressed_state},
-    /* 6x6C */ {0x5D, 0x64, 0x6C, on_sync_joining_player_compressed_state},
-    /* 6x6D */ {0x5E, 0x65, 0x6D, on_sync_joining_player_compressed_state},
-    /* 6x6E */ {0x5F, 0x66, 0x6E, on_sync_joining_player_compressed_state},
-    /* 6x6F */ {NONE, NONE, 0x6F, on_sync_joining_player_quest_flags},
-    /* 6x70 */ {0x60, 0x67, 0x70, on_sync_joining_player_disp_and_inventory},
-    /* 6x71 */ {NONE, NONE, 0x71, on_forward_check_game_loading_expected},
-    /* 6x72 */ {0x61, 0x68, 0x72, on_forward_check_game_loading_expected},
-    /* 6x73 */ {NONE, NONE, 0x73, on_forward_check_game_quest},
-    /* 6x74 */ {0x62, 0x69, 0x74, on_word_select, SDF::ALWAYS_FORWARD_TO_WATCHERS},
-    /* 6x75 */ {NONE, NONE, 0x75, on_set_quest_flag},
-    /* 6x76 */ {NONE, NONE, 0x76, on_set_entity_set_flag},
-    /* 6x77 */ {NONE, NONE, 0x77, on_sync_quest_register},
-    /* 6x78 */ {NONE, NONE, 0x78, forward_subcommand},
-    /* 6x79 */ {NONE, NONE, 0x79, on_forward_check_lobby},
-    /* 6x7A */ {NONE, NONE, 0x7A, on_forward_check_game_client},
-    /* 6x7B */ {NONE, NONE, 0x7B, forward_subcommand},
-    /* 6x7C */ {NONE, NONE, 0x7C, on_challenge_update_records},
-    /* 6x7D */ {NONE, NONE, 0x7D, on_update_battle_data_6x7D},
-    /* 6x7E */ {NONE, NONE, 0x7E, forward_subcommand},
-    /* 6x7F */ {NONE, NONE, 0x7F, on_battle_scores},
-    /* 6x80 */ {NONE, NONE, 0x80, on_forward_check_game},
-    /* 6x81 */ {NONE, NONE, 0x81, on_forward_check_game},
-    /* 6x82 */ {NONE, NONE, 0x82, on_forward_check_game},
-    /* 6x83 */ {NONE, NONE, 0x83, on_forward_check_game},
-    /* 6x84 */ {NONE, NONE, 0x84, on_vol_opt_actions_t<G_VolOptBossActions_6x84>},
-    /* 6x85 */ {NONE, NONE, 0x85, on_forward_check_game},
-    /* 6x86 */ {NONE, NONE, 0x86, on_update_object_state_t<G_HitDestructibleObject_6x86>},
-    /* 6x87 */ {NONE, NONE, 0x87, on_forward_check_game},
-    /* 6x88 */ {NONE, NONE, 0x88, on_forward_check_game},
-    /* 6x89 */ {NONE, NONE, 0x89, forward_subcommand_with_entity_id_transcode_t<G_SetKillerEntityID_6x89, false, offsetof(G_SetKillerEntityID_6x89, killer_entity_id)>},
-    /* 6x8A */ {NONE, NONE, 0x8A, on_forward_check_game},
-    /* 6x8B */ {NONE, NONE, 0x8B, on_forward_check_game},
-    /* 6x8C */ {NONE, NONE, 0x8C, on_forward_check_game},
-    /* 6x8D */ {NONE, NONE, 0x8D, on_forward_check_game_client},
-    /* 6x8E */ {NONE, NONE, 0x8E, on_forward_check_game},
-    /* 6x8F */ {NONE, NONE, 0x8F, forward_subcommand_with_entity_id_transcode_t<G_AddBattleDamageScores_6x8F, false, offsetof(G_AddBattleDamageScores_6x8F, target_entity_id)>},
-    /* 6x90 */ {NONE, NONE, 0x90, on_forward_check_game},
-    /* 6x91 */ {NONE, NONE, 0x91, on_update_attackable_col_state},
-    /* 6x92 */ {NONE, NONE, 0x92, on_forward_check_game},
-    /* 6x93 */ {NONE, NONE, 0x93, on_activate_timed_switch},
-    /* 6x94 */ {NONE, NONE, 0x94, on_warp},
-    /* 6x95 */ {NONE, NONE, 0x95, on_forward_check_game},
-    /* 6x96 */ {NONE, NONE, 0x96, on_forward_check_game},
-    /* 6x97 */ {NONE, NONE, 0x97, on_challenge_mode_retry_or_quit},
-    /* 6x98 */ {NONE, NONE, 0x98, on_forward_check_game},
-    /* 6x99 */ {NONE, NONE, 0x99, on_forward_check_game},
-    /* 6x9A */ {NONE, NONE, 0x9A, on_forward_check_game_client},
-    /* 6x9B */ {NONE, NONE, 0x9B, on_battle_tech_level_up},
-    /* 6x9C */ {NONE, NONE, 0x9C, on_set_enemy_status_effect_flags_ultimate},
-    /* 6x9D */ {NONE, NONE, 0x9D, on_forward_check_game},
-    /* 6x9E */ {NONE, NONE, 0x9E, forward_subcommand},
-    /* 6x9F */ {NONE, NONE, 0x9F, forward_subcommand_with_entity_id_transcode_t<G_GalGryphonBossActions_6x9F>},
-    /* 6xA0 */ {NONE, NONE, 0xA0, forward_subcommand_with_entity_id_transcode_t<G_GalGryphonBossActions_6xA0>},
-    /* 6xA1 */ {NONE, NONE, 0xA1, on_forward_check_game},
-    /* 6xA2 */ {NONE, NONE, 0xA2, on_entity_drop_item_request},
-    /* 6xA3 */ {NONE, NONE, 0xA3, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowBossActions_6xA3>},
-    /* 6xA4 */ {NONE, NONE, 0xA4, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowBossActions_6xA4_6xA5>},
-    /* 6xA5 */ {NONE, NONE, 0xA5, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowBossActions_6xA4_6xA5>},
-    /* 6xA6 */ {NONE, NONE, 0xA6, on_forward_check_game},
-    /* 6xA7 */ {NONE, NONE, 0xA7, forward_subcommand},
-    /* 6xA8 */ {NONE, NONE, 0xA8, on_gol_dragon_actions},
-    /* 6xA9 */ {NONE, NONE, 0xA9, forward_subcommand_with_entity_id_transcode_t<G_BarbaRayBossActions_6xA9>},
-    /* 6xAA */ {NONE, NONE, 0xAA, forward_subcommand_with_entity_id_transcode_t<G_BarbaRayBossActions_6xAA>},
-    /* 6xAB */ {NONE, NONE, 0xAB, on_gc_nte_exclusive},
-    /* 6xAC */ {NONE, NONE, 0xAC, on_gc_nte_exclusive},
-    /* 6xAD */ {NONE, NONE, 0xAD, on_forward_check_game},
-    /* 6xAE */ {NONE, NONE, 0xAE, on_forward_check_client},
-    /* 6xAF */ {NONE, NONE, 0xAF, on_forward_check_lobby_client},
-    /* 6xB0 */ {NONE, NONE, 0xB0, on_forward_check_lobby_client},
-    /* 6xB1 */ {NONE, NONE, 0xB1, forward_subcommand},
-    /* 6xB2 */ {NONE, NONE, 0xB2, on_play_sound_from_player},
-    /* 6xB3 */ {NONE, NONE, 0xB3, on_xbox_voice_chat_control}, // Ep3 6xBx commands are handled via on_CA_Ep3 instead
-    /* 6xB4 */ {NONE, NONE, 0xB4, on_xbox_voice_chat_control},
-    /* 6xB5 */ {NONE, NONE, 0xB5, on_open_shop_bb_or_ep3_battle_subs},
-    /* 6xB6 */ {NONE, NONE, 0xB6, on_invalid},
-    /* 6xB7 */ {NONE, NONE, 0xB7, on_buy_shop_item_bb},
-    /* 6xB8 */ {NONE, NONE, 0xB8, on_identify_item_bb},
-    /* 6xB9 */ {NONE, NONE, 0xB9, on_invalid},
-    /* 6xBA */ {NONE, NONE, 0xBA, on_accept_identify_item_bb},
-    /* 6xBB */ {NONE, NONE, 0xBB, on_open_bank_bb_or_card_trade_counter_ep3},
-    /* 6xBC */ {NONE, NONE, 0xBC, on_ep3_trade_card_counts},
-    /* 6xBD */ {NONE, NONE, 0xBD, on_ep3_private_word_select_bb_bank_action, SDF::ALWAYS_FORWARD_TO_WATCHERS},
-    /* 6xBE */ {NONE, NONE, 0xBE, forward_subcommand, SDF::ALWAYS_FORWARD_TO_WATCHERS | SDF::ALLOW_FORWARD_TO_WATCHED_LOBBY},
-    /* 6xBF */ {NONE, NONE, 0xBF, on_forward_check_ep3_lobby},
-    /* 6xC0 */ {NONE, NONE, 0xC0, on_sell_item_at_shop_bb},
-    /* 6xC1 */ {NONE, NONE, 0xC1, forward_subcommand},
-    /* 6xC2 */ {NONE, NONE, 0xC2, forward_subcommand},
-    /* 6xC3 */ {NONE, NONE, 0xC3, on_drop_partial_stack_bb},
-    /* 6xC4 */ {NONE, NONE, 0xC4, on_sort_inventory_bb},
-    /* 6xC5 */ {NONE, NONE, 0xC5, on_medical_center_bb},
-    /* 6xC6 */ {NONE, NONE, 0xC6, on_steal_exp_bb},
-    /* 6xC7 */ {NONE, NONE, 0xC7, on_charge_attack_bb},
-    /* 6xC8 */ {NONE, NONE, 0xC8, on_enemy_exp_request_bb},
-    /* 6xC9 */ {NONE, NONE, 0xC9, on_adjust_player_meseta_bb},
-    /* 6xCA */ {NONE, NONE, 0xCA, on_quest_create_item_bb},
-    /* 6xCB */ {NONE, NONE, 0xCB, on_transfer_item_via_mail_message_bb},
-    /* 6xCC */ {NONE, NONE, 0xCC, on_exchange_item_for_team_points_bb},
-    /* 6xCD */ {NONE, NONE, 0xCD, forward_subcommand},
-    /* 6xCE */ {NONE, NONE, 0xCE, forward_subcommand},
-    /* 6xCF */ {NONE, NONE, 0xCF, on_battle_restart_bb},
-    /* 6xD0 */ {NONE, NONE, 0xD0, on_battle_level_up_bb},
-    /* 6xD1 */ {NONE, NONE, 0xD1, on_request_challenge_grave_recovery_item_bb},
-    /* 6xD2 */ {NONE, NONE, 0xD2, on_write_quest_counter_bb},
-    /* 6xD3 */ {NONE, NONE, 0xD3, on_invalid},
-    /* 6xD4 */ {NONE, NONE, 0xD4, on_forward_check_game},
-    /* 6xD5 */ {NONE, NONE, 0xD5, on_quest_exchange_item_bb},
-    /* 6xD6 */ {NONE, NONE, 0xD6, on_wrap_item_bb},
-    /* 6xD7 */ {NONE, NONE, 0xD7, on_photon_drop_exchange_for_item_bb},
-    /* 6xD8 */ {NONE, NONE, 0xD8, on_photon_drop_exchange_for_s_rank_special_bb},
-    /* 6xD9 */ {NONE, NONE, 0xD9, on_momoka_item_exchange_bb},
-    /* 6xDA */ {NONE, NONE, 0xDA, on_upgrade_weapon_attribute_bb},
-    /* 6xDB */ {NONE, NONE, 0xDB, on_invalid},
-    /* 6xDC */ {NONE, NONE, 0xDC, on_forward_check_game},
-    /* 6xDD */ {NONE, NONE, 0xDD, on_invalid},
-    /* 6xDE */ {NONE, NONE, 0xDE, on_secret_lottery_ticket_exchange_bb},
-    /* 6xDF */ {NONE, NONE, 0xDF, on_photon_crystal_exchange_bb},
-    /* 6xE0 */ {NONE, NONE, 0xE0, on_quest_F95E_result_bb},
-    /* 6xE1 */ {NONE, NONE, 0xE1, on_quest_F95F_result_bb},
-    /* 6xE2 */ {NONE, NONE, 0xE2, on_quest_F960_result_bb},
-    /* 6xE3 */ {NONE, NONE, 0xE3, on_invalid},
-    /* 6xE4 */ {NONE, NONE, 0xE4, on_incr_enemy_damage}, // Extended subcommand; see CommandFormats.hh
-    /* 6xE5 */ {NONE, NONE, 0xE5, on_invalid},
-    /* 6xE6 */ {NONE, NONE, 0xE6, on_invalid},
-    /* 6xE7 */ {NONE, NONE, 0xE7, on_invalid},
-    /* 6xE8 */ {NONE, NONE, 0xE8, on_invalid},
-    /* 6xE9 */ {NONE, NONE, 0xE9, on_invalid},
-    /* 6xEA */ {NONE, NONE, 0xEA, on_invalid},
-    /* 6xEB */ {NONE, NONE, 0xEB, on_invalid},
-    /* 6xEC */ {NONE, NONE, 0xEC, on_invalid},
-    /* 6xED */ {NONE, NONE, 0xED, on_invalid},
-    /* 6xEE */ {NONE, NONE, 0xEE, on_invalid},
-    /* 6xEF */ {NONE, NONE, 0xEF, on_invalid},
-    /* 6xF0 */ {NONE, NONE, 0xF0, on_invalid},
-    /* 6xF1 */ {NONE, NONE, 0xF1, on_invalid},
-    /* 6xF2 */ {NONE, NONE, 0xF2, on_invalid},
-    /* 6xF3 */ {NONE, NONE, 0xF3, on_invalid},
-    /* 6xF4 */ {NONE, NONE, 0xF4, on_invalid},
-    /* 6xF5 */ {NONE, NONE, 0xF5, on_invalid},
-    /* 6xF6 */ {NONE, NONE, 0xF6, on_invalid},
-    /* 6xF7 */ {NONE, NONE, 0xF7, on_invalid},
-    /* 6xF8 */ {NONE, NONE, 0xF8, on_invalid},
-    /* 6xF9 */ {NONE, NONE, 0xF9, on_invalid},
-    /* 6xFA */ {NONE, NONE, 0xFA, on_invalid},
-    /* 6xFB */ {NONE, NONE, 0xFB, on_invalid},
-    /* 6xFC */ {NONE, NONE, 0xFC, on_invalid},
-    /* 6xFD */ {NONE, NONE, 0xFD, on_invalid},
-    /* 6xFE */ {NONE, NONE, 0xFE, on_invalid},
-    /* 6xFF */ {NONE, NONE, 0xFF, on_debug_info}, // Extended subcommand with no format; used for debugging patches
+    // {DC NTE, 11/2000, GC NTE, all other versions, handler}
+    /* 6x00 */ {0x00, 0x00, 0x00, 0x00, on_invalid},
+    /* 6x01 */ {0x01, 0x01, 0x01, 0x01, on_invalid},
+    /* 6x02 */ {0x02, 0x02, 0x02, 0x02, forward_subcommand},
+    /* 6x03 */ {0x03, 0x03, 0x03, 0x03, forward_subcommand},
+    /* 6x04 */ {0x04, 0x04, 0x04, 0x04, forward_subcommand},
+    /* 6x05 */ {0x05, 0x05, 0x05, 0x05, on_switch_state_changed},
+    /* 6x06 */ {0x06, 0x06, 0x06, 0x06, on_send_guild_card},
+    /* 6x07 */ {0x07, 0x07, 0x07, 0x07, on_symbol_chat, SDF::ALWAYS_FORWARD_TO_WATCHERS},
+    /* 6x08 */ {0x08, 0x08, 0x08, 0x08, on_invalid},
+    /* 6x09 */ {0x09, 0x09, 0x09, 0x09, on_invalid}, // See notes in CommandFormats.hh
+    /* 6x0A */ {0x0A, 0x0A, 0x0A, 0x0A, on_update_enemy_state},
+    /* 6x0B */ {0x0B, 0x0B, 0x0B, 0x0B, on_update_object_state_t<G_UpdateObjectState_6x0B>},
+    /* 6x0C */ {0x0C, 0x0C, 0x0C, 0x0C, on_received_condition},
+    /* 6x0D */ {NONE, NONE, 0x0D, 0x0D, on_forward_check_game},
+    /* 6x0E */ {NONE, NONE, 0x0E, 0x0E, forward_subcommand_with_entity_id_transcode_t<G_ClearNegativeStatusEffects_6x0E>},
+    /* 6x0F */ {NONE, NONE, 0x0F, 0x0F, on_invalid},
+    /* 6x10 */ {0x0E, 0x0E, 0x10, 0x10, forward_subcommand_with_entity_id_transcode_t<G_DragonBossActions_6x10_6x11>},
+    /* 6x11 */ {0x0F, 0x0F, 0x11, 0x11, forward_subcommand_with_entity_id_transcode_t<G_DragonBossActions_6x10_6x11>},
+    /* 6x12 */ {0x10, 0x10, 0x12, 0x12, on_dragon_actions_6x12},
+    /* 6x13 */ {0x11, 0x11, 0x13, 0x13, forward_subcommand_with_entity_id_transcode_t<G_DeRolLeBossActions_6x13>},
+    /* 6x14 */ {0x12, 0x12, 0x14, 0x14, forward_subcommand_with_entity_id_transcode_t<G_DeRolLeBossActionsWithTarget_6x14>},
+    /* 6x15 */ {0x13, 0x13, 0x15, 0x15, forward_subcommand_with_entity_id_transcode_t<G_VolOptBossActions_6x15>},
+    /* 6x16 */ {0x14, 0x14, 0x16, 0x16, on_vol_opt_actions_t<G_VolOptBossActions_6x16>},
+    /* 6x17 */ {0x15, 0x15, 0x17, 0x17, on_set_entity_pos_and_angle_6x17},
+    /* 6x18 */ {0x16, 0x16, 0x18, 0x18, forward_subcommand_with_entity_id_transcode_t<G_SyncVolOpt2PartsHP_6x18>},
+    /* 6x19 */ {0x17, 0x17, 0x19, 0x19, forward_subcommand_with_entity_id_transcode_t<G_DarkFalzActions_6x19>},
+    /* 6x1A */ {NONE, NONE, 0x1A, 0x1A, on_invalid},
+    /* 6x1B */ {NONE, 0x19, 0x1B, 0x1B, on_forward_check_game},
+    /* 6x1C */ {NONE, 0x1A, 0x1C, 0x1C, on_forward_check_game},
+    /* 6x1D */ {0x19, 0x1B, 0x1D, 0x1D, on_invalid},
+    /* 6x1E */ {0x1A, 0x1C, 0x1E, 0x1E, on_invalid},
+    /* 6x1F */ {0x1B, 0x1D, 0x1F, 0x1F, on_change_floor_6x1F},
+    /* 6x20 */ {0x1C, 0x1E, 0x20, 0x20, on_movement_xyz_with_floor<G_SetPosition_6x20>},
+    /* 6x21 */ {0x1D, 0x1F, 0x21, 0x21, on_change_floor_6x21},
+    /* 6x22 */ {0x1E, 0x20, 0x22, 0x22, on_forward_check_client},
+    /* 6x23 */ {0x1F, 0x21, 0x23, 0x23, on_set_player_visible},
+    /* 6x24 */ {0x20, 0x22, 0x24, 0x24, on_movement_xyz<G_TeleportPlayer_6x24>},
+    /* 6x25 */ {0x21, 0x23, 0x25, 0x25, on_equip_item},
+    /* 6x26 */ {0x22, 0x24, 0x26, 0x26, on_unequip_item}, // TODO: Why does BB allow this in the lobby?
+    /* 6x27 */ {0x23, 0x25, 0x27, 0x27, on_use_item},
+    /* 6x28 */ {0x24, 0x26, 0x28, 0x28, on_feed_mag},
+    /* 6x29 */ {0x25, 0x27, 0x29, 0x29, on_destroy_inventory_item},
+    /* 6x2A */ {0x26, 0x28, 0x2A, 0x2A, on_player_drop_item},
+    /* 6x2B */ {0x27, 0x29, 0x2B, 0x2B, on_create_inventory_item},
+    /* 6x2C */ {0x28, 0x2A, 0x2C, 0x2C, on_forward_check_client},
+    /* 6x2D */ {0x29, 0x2B, 0x2D, 0x2D, on_forward_check_client},
+    /* 6x2E */ {0x2A, 0x2C, 0x2E, 0x2E, on_forward_check_client},
+    /* 6x2F */ {0x2B, 0x2D, 0x2F, 0x2F, on_change_hp<G_ChangePlayerHP_6x2F>},
+    /* 6x30 */ {0x2C, 0x2E, 0x30, 0x30, on_level_up},
+    /* 6x31 */ {0x2D, 0x2F, 0x31, 0x31, on_forward_check_game},
+    /* 6x32 */ {NONE, NONE, 0x32, 0x32, on_forward_check_game},
+    /* 6x33 */ {0x2E, 0x30, 0x33, 0x33, on_forward_check_game},
+    /* 6x34 */ {0x2F, 0x31, 0x34, 0x34, on_forward_check_game},
+    /* 6x35 */ {0x30, NONE, 0x35, 0x35, on_invalid},
+    /* 6x36 */ {0x31, 0x32, 0x36, 0x36, on_forward_check_game},
+    /* 6x37 */ {0x32, 0x33, 0x37, 0x37, on_forward_check_game},
+    /* 6x38 */ {NONE, 0x34, 0x38, 0x38, on_forward_check_game},
+    /* NONE */ {0x33, 0x35, NONE, NONE, on_forward_check_game},
+    /* 6x39 */ {NONE, 0x36, 0x39, 0x39, on_forward_check_game},
+    /* 6x3A */ {NONE, 0x37, 0x3A, 0x3A, on_forward_check_game},
+    /* 6x3B */ {NONE, 0x38, 0x3B, 0x3B, forward_subcommand},
+    /* 6x3C */ {0x34, 0x39, 0x3C, 0x3C, forward_subcommand},
+    /* 6x3D */ {0x35, 0x3A, 0x3D, 0x3D, on_invalid},
+    /* 6x3E */ {NONE, NONE, 0x3E, 0x3E, on_movement_xyz_with_floor<G_StopAtPosition_6x3E>},
+    /* 6x3F */ {0x36, 0x3B, 0x3F, 0x3F, on_movement_xyz_with_floor<G_SetPosition_6x3F>},
+    /* 6x40 */ {0x37, 0x3C, 0x40, 0x40, on_movement_xz<G_WalkToPosition_6x40>},
+    /* 6x41 */ {0x38, 0x3D, 0x41, 0x41, on_movement_xz<G_MoveToPosition_6x41_6x42>},
+    /* 6x42 */ {0x39, 0x3E, 0x42, 0x42, on_movement_xz<G_MoveToPosition_6x41_6x42>},
+    /* 6x43 */ {0x3A, 0x3F, 0x43, 0x43, on_forward_check_game_client},
+    /* 6x44 */ {0x3B, 0x40, 0x44, 0x44, on_forward_check_game_client},
+    /* 6x45 */ {0x3C, 0x41, 0x45, 0x45, on_forward_check_game_client},
+    /* 6x46 */ {NONE, 0x42, 0x46, 0x46, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_AttackFinished_Header_6x46>},
+    /* 6x47 */ {0x3D, 0x43, 0x47, 0x47, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_CastTechnique_Header_6x47>},
+    /* 6x48 */ {NONE, NONE, 0x48, 0x48, on_cast_technique_finished},
+    /* 6x49 */ {0x3E, 0x44, 0x49, 0x49, forward_subcommand_with_entity_targets_transcode_and_track_hits_t<G_ExecutePhotonBlast_Header_6x49>},
+    /* 6x4A */ {0x3F, 0x45, 0x4A, 0x4A, on_change_hp<G_ClientIDHeader>},
+    /* 6x4B */ {0x40, 0x46, 0x4B, 0x4B, on_change_hp<G_ClientIDHeader>},
+    /* 6x4C */ {0x41, 0x47, 0x4C, 0x4C, on_change_hp<G_ClientIDHeader>},
+    /* 6x4D */ {0x42, 0x48, 0x4D, 0x4D, on_player_died},
+    /* 6x4E */ {NONE, NONE, 0x4E, 0x4E, on_player_revivable},
+    /* 6x4F */ {0x43, 0x49, 0x4F, 0x4F, on_player_revived},
+    /* 6x50 */ {0x44, 0x4A, 0x50, 0x50, on_forward_check_game_client},
+    /* 6x51 */ {0x45, 0x4B, 0x51, 0x51, on_invalid},
+    /* 6x52 */ {0x46, 0x4C, 0x52, 0x52, on_set_animation_state},
+    /* 6x53 */ {0x47, 0x4D, 0x53, 0x53, on_forward_check_game},
+    /* 6x54 */ {0x48, 0x4E, 0x54, 0x54, forward_subcommand},
+    /* 6x55 */ {0x49, 0x4F, 0x55, 0x55, on_movement_xyz<G_IntraMapWarp_6x55>},
+    /* 6x56 */ {0x4A, 0x50, 0x56, 0x56, on_movement_xyz<G_SetPlayerPositionAndAngle_6x56>},
+    /* 6x57 */ {NONE, 0x51, 0x57, 0x57, on_forward_check_client},
+    /* 6x58 */ {NONE, NONE, 0x58, 0x58, on_forward_check_client},
+    /* 6x59 */ {0x4B, 0x52, 0x59, 0x59, on_pick_up_item},
+    /* 6x5A */ {0x4C, 0x53, 0x5A, 0x5A, on_pick_up_item_request},
+    /* 6x5B */ {0x4D, 0x54, 0x5B, 0x5B, forward_subcommand},
+    /* 6x5C */ {0x4E, 0x55, 0x5C, 0x5C, on_destroy_floor_item},
+    /* 6x5D */ {0x4F, 0x56, 0x5D, 0x5D, on_drop_partial_stack},
+    /* 6x5E */ {0x50, 0x57, 0x5E, 0x5E, on_buy_shop_item},
+    /* 6x5F */ {0x51, 0x58, 0x5F, 0x5F, on_box_or_enemy_item_drop},
+    /* 6x60 */ {0x52, 0x59, 0x60, 0x60, on_entity_drop_item_request},
+    /* 6x61 */ {0x53, 0x5A, 0x61, 0x61, on_forward_check_game},
+    /* 6x62 */ {0x54, 0x5B, 0x62, 0x62, on_forward_check_game},
+    /* 6x63 */ {0x55, 0x5C, 0x63, 0x63, on_destroy_floor_item},
+    /* 6x64 */ {0x56, 0x5D, 0x64, 0x64, on_forward_check_game},
+    /* 6x65 */ {0x57, 0x5E, 0x65, 0x65, on_forward_check_game},
+    /* 6x66 */ {NONE, NONE, 0x66, 0x66, on_forward_check_game},
+    /* 6x67 */ {0x58, 0x5F, 0x67, 0x67, on_trigger_set_event},
+    /* 6x68 */ {0x59, 0x60, 0x68, 0x68, on_update_telepipe_state},
+    /* 6x69 */ {0x5A, 0x61, 0x69, 0x69, on_npc_control},
+    /* 6x6A */ {0x5B, 0x62, 0x6A, 0x6A, on_set_boss_warp_state_6x6A},
+    /* 6x6B */ {0x5C, 0x63, 0x6B, 0x6B, on_sync_joining_player_compressed_state},
+    /* 6x6C */ {0x5D, 0x64, 0x6C, 0x6C, on_sync_joining_player_compressed_state},
+    /* 6x6D */ {0x5E, 0x65, 0x6D, 0x6D, on_sync_joining_player_compressed_state},
+    /* 6x6E */ {0x5F, 0x66, 0x6E, 0x6E, on_sync_joining_player_compressed_state},
+    /* 6x6F */ {NONE, NONE, 0x6F, 0x6F, on_sync_joining_player_quest_flags},
+    /* 6x70 */ {0x60, 0x67, 0x70, 0x70, on_sync_joining_player_disp_and_inventory},
+    /* 6x71 */ {NONE, NONE, 0x71, 0x71, on_forward_check_game_loading_expected},
+    /* 6x72 */ {0x61, 0x68, 0x72, 0x72, on_forward_check_game_loading_expected},
+    /* 6x73 */ {NONE, NONE, 0x73, 0x73, on_forward_check_game_quest},
+    /* 6x74 */ {0x62, 0x69, 0x74, 0x74, on_word_select, SDF::ALWAYS_FORWARD_TO_WATCHERS},
+    /* 6x75 */ {NONE, NONE, 0x75, 0x75, on_set_quest_flag},
+    /* 6x76 */ {NONE, NONE, 0x76, 0x76, on_set_entity_set_flag},
+    /* 6x77 */ {NONE, NONE, 0x77, 0x77, on_sync_quest_register},
+    /* 6x78 */ {NONE, NONE, 0x78, 0x78, forward_subcommand},
+    /* 6x79 */ {NONE, NONE, 0x79, 0x79, on_forward_check_lobby},
+    /* 6x7A */ {NONE, NONE, 0x7A, 0x7A, on_forward_check_game_client},
+    /* 6x7B */ {NONE, NONE, 0x7B, 0x7B, forward_subcommand},
+    /* 6x7C */ {NONE, NONE, 0x7C, 0x7C, on_challenge_update_records},
+    /* 6x7D */ {NONE, NONE, 0x7D, 0x7D, on_update_battle_data_6x7D},
+    /* 6x7E */ {NONE, NONE, 0x7E, 0x7E, forward_subcommand},
+    /* 6x7F */ {NONE, NONE, 0x7F, 0x7F, on_battle_scores},
+    /* 6x80 */ {NONE, NONE, 0x80, 0x80, on_forward_check_game},
+    /* 6x81 */ {NONE, NONE, 0x81, 0x81, on_forward_check_game},
+    /* 6x82 */ {NONE, NONE, 0x82, 0x82, on_forward_check_game},
+    /* 6x83 */ {NONE, NONE, 0x83, 0x83, on_forward_check_game},
+    /* 6x84 */ {NONE, NONE, 0x84, 0x84, on_vol_opt_actions_t<G_VolOptUltimateBossActions_6x84>},
+    /* 6x85 */ {NONE, NONE, 0x85, 0x85, on_forward_check_game},
+    /* 6x86 */ {NONE, NONE, 0x86, 0x86, on_update_object_state_t<G_HitDestructibleObject_6x86>},
+    /* 6x87 */ {NONE, NONE, 0x87, 0x87, on_forward_check_game},
+    /* 6x88 */ {NONE, NONE, 0x88, 0x88, on_forward_check_game},
+    /* 6x89 */ {NONE, NONE, 0x89, 0x89, forward_subcommand_with_entity_id_transcode_t<G_SetKillerEntityID_6x89, false, offsetof(G_SetKillerEntityID_6x89, killer_entity_id)>},
+    /* 6x8A */ {NONE, NONE, 0x8A, 0x8A, on_forward_check_game},
+    /* 6x8B */ {NONE, NONE, 0x8B, 0x8B, on_forward_check_game},
+    /* 6x8C */ {NONE, NONE, 0x8C, 0x8C, on_forward_check_game},
+    /* 6x8D */ {NONE, NONE, 0x8D, 0x8D, on_forward_check_game_client},
+    /* 6x8E */ {NONE, NONE, 0x8E, 0x8E, on_forward_check_game},
+    /* 6x8F */ {NONE, NONE, 0x8F, 0x8F, forward_subcommand_with_entity_id_transcode_t<G_AddBattleDamageScores_6x8F, false, offsetof(G_AddBattleDamageScores_6x8F, target_entity_id)>},
+    /* 6x90 */ {NONE, NONE, 0x90, 0x90, on_forward_check_game},
+    /* 6x91 */ {NONE, NONE, 0x91, 0x91, on_update_attackable_col_state},
+    /* 6x92 */ {NONE, NONE, 0x92, 0x92, on_forward_check_game},
+    /* 6x93 */ {NONE, NONE, 0x93, 0x93, on_activate_timed_switch},
+    /* 6x94 */ {NONE, NONE, 0x94, 0x94, on_warp},
+    /* 6x95 */ {NONE, NONE, 0x95, 0x95, on_set_challenge_time_6x95},
+    /* 6x96 */ {NONE, NONE, 0x96, 0x96, on_forward_check_game},
+    /* 6x97 */ {NONE, NONE, 0x97, 0x97, on_challenge_mode_retry_or_quit},
+    /* 6x98 */ {NONE, NONE, 0x98, 0x98, on_forward_check_game},
+    /* 6x99 */ {NONE, NONE, 0x99, 0x99, on_forward_check_game},
+    /* 6x9A */ {NONE, NONE, 0x9A, 0x9A, on_forward_check_game_client},
+    /* 6x9B */ {NONE, NONE, 0x9B, 0x9B, on_battle_tech_level_up},
+    /* 6x9C */ {NONE, NONE, 0x9C, 0x9C, on_set_enemy_status_effect_flags_ultimate},
+    /* 6x9D */ {NONE, NONE, 0x9D, 0x9D, on_forward_check_game},
+    /* 6x9E */ {NONE, NONE, 0x9E, 0x9E, forward_subcommand},
+    /* 6x9F */ {NONE, NONE, 0x9F, 0x9F, forward_subcommand_with_entity_id_transcode_t<G_GalGryphonBossActions_6x9F>},
+    /* 6xA0 */ {NONE, NONE, 0xA0, 0xA0, forward_subcommand_with_entity_id_transcode_t<G_GalGryphonBossActions_6xA0>},
+    /* 6xA1 */ {NONE, NONE, 0xA1, 0xA1, on_forward_check_game},
+    /* 6xA2 */ {NONE, NONE, 0xA2, 0xA2, on_entity_drop_item_request},
+    /* 6xA3 */ {NONE, NONE, 0xA3, 0xA3, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowBossActions_6xA3>},
+    /* 6xA4 */ {NONE, NONE, 0xA4, 0xA4, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowPhase1BossActions_6xA4>},
+    /* 6xA5 */ {NONE, NONE, 0xA5, 0xA5, forward_subcommand_with_entity_id_transcode_t<G_OlgaFlowPhase2BossActions_6xA5>},
+    /* 6xA6 */ {NONE, NONE, 0xA6, 0xA6, on_forward_check_game},
+    /* 6xA7 */ {NONE, NONE, 0xA7, 0xA7, forward_subcommand},
+    /* 6xA8 */ {NONE, NONE, 0xAA, 0xA8, on_gol_dragon_actions},
+    /* 6xA9 */ {NONE, NONE, 0xAB, 0xA9, forward_subcommand_with_entity_id_transcode_t<G_BarbaRayBossActions_6xA9_GCNTE_6xAB>},
+    /* 6xAA */ {NONE, NONE, 0xAC, 0xAA, forward_subcommand_with_entity_id_transcode_t<G_BarbaRayBossActions_6xAA_GCNTE_6xAC>},
+    /* 6xAB */ {NONE, NONE, NONE, 0xAB, forward_subcommand},
+    /* 6xAC */ {NONE, NONE, NONE, 0xAC, on_invalid},
+    /* 6xAD */ {NONE, NONE, NONE, 0xAD, on_forward_check_game},
+    /* 6xAE */ {NONE, NONE, NONE, 0xAE, on_forward_check_client},
+    /* 6xAF */ {NONE, NONE, NONE, 0xAF, on_forward_check_lobby_client},
+    /* 6xB0 */ {NONE, NONE, NONE, 0xB0, on_forward_check_lobby_client},
+    /* 6xB1 */ {NONE, NONE, NONE, 0xB1, forward_subcommand},
+    /* 6xB2 */ {NONE, NONE, NONE, 0xB2, on_play_sound_from_player},
+    /* 6xB3 */ {NONE, NONE, NONE, 0xB3, on_xbox_voice_chat_control}, // Ep3 6xBx commands are handled via on_CA_Ep3 instead
+    /* 6xB4 */ {NONE, NONE, NONE, 0xB4, on_xbox_voice_chat_control},
+    /* 6xB5 */ {NONE, NONE, NONE, 0xB5, on_open_shop_bb_or_ep3_battle_subs},
+    /* 6xB6 */ {NONE, NONE, NONE, 0xB6, on_invalid},
+    /* 6xB7 */ {NONE, NONE, NONE, 0xB7, on_buy_shop_item_bb},
+    /* 6xB8 */ {NONE, NONE, NONE, 0xB8, on_identify_item_bb},
+    /* 6xB9 */ {NONE, NONE, NONE, 0xB9, on_invalid},
+    /* 6xBA */ {NONE, NONE, NONE, 0xBA, on_accept_identify_item_bb},
+    /* 6xBB */ {NONE, NONE, NONE, 0xBB, on_open_bank_bb_or_card_trade_counter_ep3},
+    /* 6xBC */ {NONE, NONE, NONE, 0xBC, on_ep3_trade_card_counts},
+    /* 6xBD */ {NONE, NONE, NONE, 0xBD, on_ep3_private_word_select_bb_bank_action, SDF::ALWAYS_FORWARD_TO_WATCHERS},
+    /* 6xBE */ {NONE, NONE, NONE, 0xBE, forward_subcommand, SDF::ALWAYS_FORWARD_TO_WATCHERS | SDF::ALLOW_FORWARD_TO_WATCHED_LOBBY},
+    /* 6xBF */ {NONE, NONE, NONE, 0xBF, on_forward_check_ep3_lobby},
+    /* 6xC0 */ {NONE, NONE, NONE, 0xC0, on_sell_item_at_shop_bb},
+    /* 6xC1 */ {NONE, NONE, NONE, 0xC1, forward_subcommand},
+    /* 6xC2 */ {NONE, NONE, NONE, 0xC2, forward_subcommand},
+    /* 6xC3 */ {NONE, NONE, NONE, 0xC3, on_drop_partial_stack_bb},
+    /* 6xC4 */ {NONE, NONE, NONE, 0xC4, on_sort_inventory_bb},
+    /* 6xC5 */ {NONE, NONE, NONE, 0xC5, on_medical_center_bb},
+    /* 6xC6 */ {NONE, NONE, NONE, 0xC6, on_steal_exp_bb},
+    /* 6xC7 */ {NONE, NONE, NONE, 0xC7, on_charge_attack_bb},
+    /* 6xC8 */ {NONE, NONE, NONE, 0xC8, on_enemy_exp_request_bb},
+    /* 6xC9 */ {NONE, NONE, NONE, 0xC9, on_adjust_player_meseta_bb},
+    /* 6xCA */ {NONE, NONE, NONE, 0xCA, on_quest_create_item_bb},
+    /* 6xCB */ {NONE, NONE, NONE, 0xCB, on_transfer_item_via_mail_message_bb},
+    /* 6xCC */ {NONE, NONE, NONE, 0xCC, on_exchange_item_for_team_points_bb},
+    /* 6xCD */ {NONE, NONE, NONE, 0xCD, forward_subcommand},
+    /* 6xCE */ {NONE, NONE, NONE, 0xCE, forward_subcommand},
+    /* 6xCF */ {NONE, NONE, NONE, 0xCF, on_battle_restart_bb},
+    /* 6xD0 */ {NONE, NONE, NONE, 0xD0, on_battle_level_up_bb},
+    /* 6xD1 */ {NONE, NONE, NONE, 0xD1, on_request_challenge_grave_recovery_item_bb},
+    /* 6xD2 */ {NONE, NONE, NONE, 0xD2, on_write_quest_counter_bb},
+    /* 6xD3 */ {NONE, NONE, NONE, 0xD3, on_invalid},
+    /* 6xD4 */ {NONE, NONE, NONE, 0xD4, on_forward_check_game},
+    /* 6xD5 */ {NONE, NONE, NONE, 0xD5, on_quest_exchange_item_bb},
+    /* 6xD6 */ {NONE, NONE, NONE, 0xD6, on_wrap_item_bb},
+    /* 6xD7 */ {NONE, NONE, NONE, 0xD7, on_photon_drop_exchange_for_item_bb},
+    /* 6xD8 */ {NONE, NONE, NONE, 0xD8, on_photon_drop_exchange_for_s_rank_special_bb},
+    /* 6xD9 */ {NONE, NONE, NONE, 0xD9, on_momoka_item_exchange_bb},
+    /* 6xDA */ {NONE, NONE, NONE, 0xDA, on_upgrade_weapon_attribute_bb},
+    /* 6xDB */ {NONE, NONE, NONE, 0xDB, on_invalid},
+    /* 6xDC */ {NONE, NONE, NONE, 0xDC, on_forward_check_game},
+    /* 6xDD */ {NONE, NONE, NONE, 0xDD, on_invalid},
+    /* 6xDE */ {NONE, NONE, NONE, 0xDE, on_secret_lottery_ticket_exchange_bb},
+    /* 6xDF */ {NONE, NONE, NONE, 0xDF, on_photon_crystal_exchange_bb},
+    /* 6xE0 */ {NONE, NONE, NONE, 0xE0, on_quest_F95E_result_bb},
+    /* 6xE1 */ {NONE, NONE, NONE, 0xE1, on_quest_F95F_result_bb},
+    /* 6xE2 */ {NONE, NONE, NONE, 0xE2, on_quest_F960_result_bb},
+    /* 6xE3 */ {NONE, NONE, NONE, 0xE3, on_invalid},
+    /* 6xE4 */ {NONE, NONE, NONE, 0xE4, on_incr_enemy_damage}, // Extended subcommand; see CommandFormats.hh
+    /* 6xE5 */ {NONE, NONE, NONE, 0xE5, on_invalid},
+    /* 6xE6 */ {NONE, NONE, NONE, 0xE6, on_invalid},
+    /* 6xE7 */ {NONE, NONE, NONE, 0xE7, on_invalid},
+    /* 6xE8 */ {NONE, NONE, NONE, 0xE8, on_invalid},
+    /* 6xE9 */ {NONE, NONE, NONE, 0xE9, on_invalid},
+    /* 6xEA */ {NONE, NONE, NONE, 0xEA, on_invalid},
+    /* 6xEB */ {NONE, NONE, NONE, 0xEB, on_invalid},
+    /* 6xEC */ {NONE, NONE, NONE, 0xEC, on_invalid},
+    /* 6xED */ {NONE, NONE, NONE, 0xED, on_invalid},
+    /* 6xEE */ {NONE, NONE, NONE, 0xEE, on_invalid},
+    /* 6xEF */ {NONE, NONE, NONE, 0xEF, on_invalid},
+    /* 6xF0 */ {NONE, NONE, NONE, 0xF0, on_invalid},
+    /* 6xF1 */ {NONE, NONE, NONE, 0xF1, on_invalid},
+    /* 6xF2 */ {NONE, NONE, NONE, 0xF2, on_invalid},
+    /* 6xF3 */ {NONE, NONE, NONE, 0xF3, on_invalid},
+    /* 6xF4 */ {NONE, NONE, NONE, 0xF4, on_invalid},
+    /* 6xF5 */ {NONE, NONE, NONE, 0xF5, on_invalid},
+    /* 6xF6 */ {NONE, NONE, NONE, 0xF6, on_invalid},
+    /* 6xF7 */ {NONE, NONE, NONE, 0xF7, on_invalid},
+    /* 6xF8 */ {NONE, NONE, NONE, 0xF8, on_invalid},
+    /* 6xF9 */ {NONE, NONE, NONE, 0xF9, on_invalid},
+    /* 6xFA */ {NONE, NONE, NONE, 0xFA, on_invalid},
+    /* 6xFB */ {NONE, NONE, NONE, 0xFB, on_invalid},
+    /* 6xFC */ {NONE, NONE, NONE, 0xFC, on_invalid},
+    /* 6xFD */ {NONE, NONE, NONE, 0xFD, on_invalid},
+    /* 6xFE */ {NONE, NONE, NONE, 0xFE, on_invalid},
+    /* 6xFF */ {NONE, NONE, NONE, 0xFF, on_debug_info}, // Extended subcommand with no format; used for debugging patches
 };
 
 asio::awaitable<void> on_subcommand_multi(std::shared_ptr<Client> c, Channel::Message& msg) {
@@ -5802,9 +5988,15 @@ asio::awaitable<void> on_subcommand_multi(std::shared_ptr<Client> c, Channel::Me
     if (cmd_size == 0) {
       throw std::runtime_error("invalid subcommand size");
     }
+    if (cmd_size > msg.data.size() - offset) {
+      throw std::runtime_error("subcommand extends beyond end of command");
+    }
     void* cmd_data = msg.data.data() + offset;
 
     const auto* def = def_for_subcommand(c->version(), header->subcommand);
+    if (!def) {
+      throw std::runtime_error("invalid subcommand");
+    }
     SubcommandMessage sub_msg{.command = msg.command, .flag = msg.flag, .data = cmd_data, .size = cmd_size};
     if (std::holds_alternative<SubcommandHandlerFn>(def->handler)) {
       std::get<SubcommandHandlerFn>(def->handler)(c, sub_msg);

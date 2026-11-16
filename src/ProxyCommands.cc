@@ -959,21 +959,27 @@ static asio::awaitable<HandlerResult> SC_6x60_6xA2(std::shared_ptr<Client> c, Ch
 
   ItemCreator::DropResult res;
   if (rec.obj_st) {
-    if (rec.ignore_def) {
-      c->log.info_f("Creating item from box {:04X} (area {:02X})", cmd.entity_index, cmd.effective_area);
+    if (!rec.obj_st->super_obj) {
+      c->log.warning_f("Object state has no super object");
+    } else if (rec.ignore_def) {
+      c->log.info_f("Creating item from box {:04X} (area {:02X})", cmd.entity_index, rec.effective_area);
       res = c->proxy_session->item_creator->on_box_item_drop(
-          cmd.effective_area, c->check_flag(Client::Flag::ALL_RARES_ENABLED));
+          rec.effective_area, c->check_flag(Client::Flag::ALL_RARES_ENABLED));
     } else {
-      c->log.info_f("Creating item from box {:04X} (area {:02X}; specialized with {:g} {:08X} {:08X} {:08X})",
-          cmd.entity_index, cmd.effective_area,
-          cmd.param3, cmd.param4, cmd.param5, cmd.param6);
-      res = c->proxy_session->item_creator->on_specialized_box_item_drop(
-          cmd.effective_area, cmd.param3, cmd.param4, cmd.param5, cmd.param6);
+      const auto* def = rec.obj_st->super_obj->version(c->version()).set_entry;
+      if (!def) {
+        c->log.warning_f("No set entry is available for this object");
+      } else {
+        c->log.info_f("Creating item from box {:04X} (area {:02X}; specialized with {:g} {:08X} {:08X} {:08X})",
+            cmd.entity_index, rec.effective_area, def->param3, def->param4, def->param5, def->param6);
+        res = c->proxy_session->item_creator->on_specialized_box_item_drop(
+            rec.effective_area, def->param3, def->param4, def->param5, def->param6);
+      }
     }
   } else {
-    c->log.info_f("Creating item from enemy {:04X} (area {:02X})", cmd.entity_index, cmd.effective_area);
+    c->log.info_f("Creating item from enemy {:04X} (area {:02X})", cmd.entity_index, rec.effective_area);
     res = c->proxy_session->item_creator->on_monster_item_drop(
-        rec.effective_enemy_type, cmd.effective_area, c->check_flag(Client::Flag::ALL_RARES_ENABLED));
+        rec.effective_enemy_type, rec.effective_area, c->check_flag(Client::Flag::ALL_RARES_ENABLED));
   }
 
   if (res.item.empty()) {
@@ -981,7 +987,7 @@ static asio::awaitable<HandlerResult> SC_6x60_6xA2(std::shared_ptr<Client> c, Ch
   } else {
     auto s = c->require_server_state();
     std::string name = s->data->describe_item(c->version(), res.item);
-    c->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, cmd.effective_area, name);
+    c->log.info_f("Entity {:04X} (area {:02X}) created item {}", cmd.entity_index, rec.effective_area, name);
     res.item.id = c->proxy_session->next_item_id++;
     c->log.info_f("Creating item {:08X} at {:02X}:{:g},{:g} for all clients",
         res.item.id, cmd.floor, cmd.pos.x, cmd.pos.z);
@@ -1080,7 +1086,7 @@ static asio::awaitable<HandlerResult> S_6x(std::shared_ptr<Client> c, Channel::M
       co_return co_await SC_6x60_6xA2(c, msg);
 
     case 0x6A: {
-      auto& cmd = msg.check_size_t<G_SetBossWarpFlags_6x6A>();
+      auto& cmd = msg.check_size_t<G_SetBossWarpState_6x6A>();
       if (c->proxy_session->map_state) {
         std::shared_ptr<MapState::ObjectState> obj_st;
         try {
@@ -1173,14 +1179,32 @@ static asio::awaitable<HandlerResult> S_6x(std::shared_ptr<Client> c, Channel::M
             c->log.warning_f("Blocking 6xB5x20 from server with invalid client ID");
             co_return HandlerResult::SUPPRESS;
           }
+        } else if (msg.data[4] == 0x2F) {
+          if (c->version() == Version::GC_EP3_NTE) {
+            auto& cmd = msg.check_size_t<G_SetDeckInBattleSetupMenu_Ep3NTE_6xB5x2F>();
+            if (cmd.menu_type >= 0x15) {
+              c->log.warning_f("Blocking 6xB5x2F from server with invalid menu type");
+              co_return HandlerResult::SUPPRESS;
+            }
+          } else {
+            auto& cmd = msg.check_size_t<G_SetDeckInBattleSetupMenu_Ep3_6xB5x2F>();
+            if (cmd.menu_type >= 0x15) {
+              c->log.warning_f("Blocking 6xB5x2F from server with invalid menu type");
+              co_return HandlerResult::SUPPRESS;
+            }
+          }
         } else if (msg.data[4] == 0x31) {
           auto& cmd = msg.check_size_t<G_ConfirmDeckSelection_Ep3_6xB5x31>();
           if (cmd.menu_type >= 0x15) {
             c->log.warning_f("Blocking 6xB5x31 from server with invalid menu type");
             co_return HandlerResult::SUPPRESS;
           }
+          if ((cmd.action < 2) && (cmd.target_client_id >= 4)) {
+            c->log.warning_f("Blocking 6xB5x31 from server with invalid target client ID");
+            co_return HandlerResult::SUPPRESS;
+          }
         } else if (msg.data[4] == 0x32) {
-          auto& cmd = msg.check_size_t<G_MoveSharedMenuCursor_Ep3_6xB5x32>();
+          auto& cmd = msg.check_size_t<G_SyncSharedMenuState_Ep3_6xB5x32>();
           if (cmd.menu_type >= 0x15) {
             c->log.warning_f("Blocking 6xB5x32 from server with invalid menu type");
             co_return HandlerResult::SUPPRESS;
@@ -1315,6 +1339,14 @@ static asio::awaitable<HandlerResult> C_B_D9(std::shared_ptr<Client> c, Channel:
 template <typename T>
 static asio::awaitable<HandlerResult> S_44_A6(std::shared_ptr<Client> c, Channel::Message& msg) {
   const auto& cmd = msg.check_size_t<T>();
+  // On all versions before BB, the maximum file size is 0x3FFFF (chunks are identified by header.flag which is one
+  // byte, and each chunk is 0x400 bytes except the last, which must be smaller than 0x400 bytes). On BB the maximum
+  // file size could technically be up to 4GB since header.size is a 32-bit value, but we impose a restriction on it to
+  // 4MB. In practice, this is extremely generous; I've never seen a quest file larger than 100KB, and the GBA has only
+  // 288KB of RAM (all GBA files I've seen used by PSO are in the 190KB-250KB size range).
+  if (cmd.file_size > (is_v4(c->version()) ? (4 * 1024 * 1024) : 0x3FFFF)) {
+    throw std::runtime_error("Download file is too large");
+  }
 
   std::string filename = cmd.filename.decode();
   std::string output_filename;
@@ -1378,7 +1410,7 @@ static asio::awaitable<HandlerResult> S_13_A7(std::shared_ptr<Client> c, Channel
     c->log.warning_f("Received data for non-open file {}", filename);
   }
   if (!sf) {
-    co_return HandlerResult::FORWARD;
+    co_return HandlerResult::SUPPRESS;
   }
 
   bool is_last_block = (cmd.data_size != 0x400);
@@ -1386,6 +1418,11 @@ static asio::awaitable<HandlerResult> S_13_A7(std::shared_ptr<Client> c, Channel
   size_t allowed_block_size = (block_offset < sf->total_size)
       ? std::min<size_t>(sf->total_size - block_offset, 0x400)
       : 0;
+
+  if (allowed_block_size == 0) {
+    c->log.warning_f("Server sent block outside of file range; dropping command");
+    co_return HandlerResult::SUPPRESS;
+  }
 
   if (cmd.data_size > allowed_block_size) {
     c->log.warning_f("Block size extends beyond allowed size; truncating block");
@@ -1428,6 +1465,7 @@ static asio::awaitable<HandlerResult> S_13_A7(std::shared_ptr<Client> c, Channel
         try {
           QuestMetadata meta;
           populate_quest_metadata_from_script(
+              *c->require_server_state()->data->quest_opcodes,
               meta,
               c->proxy_session->last_bin_contents->data(),
               c->proxy_session->last_bin_contents->size(),

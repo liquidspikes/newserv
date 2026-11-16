@@ -68,9 +68,9 @@ enum class CriterionCode : uint8_t {
   HU_CLASS_SC = 0x01,
   RA_CLASS_SC = 0x02,
   FO_CLASS_SC = 0x03,
-  SAME_TEAM = 0x04,
-  SAME_PLAYER = 0x05,
-  SAME_TEAM_NOT_SAME_PLAYER = 0x06, // Allies only
+  SELF_OR_ALLY = 0x04,
+  NOT_SELF = 0x05,
+  ALLY_ONLY = 0x06,
   FC = 0x07,
   NOT_SC = 0x08,
   SC = 0x09,
@@ -206,11 +206,11 @@ enum class ConditionType : uint8_t {
   ABILITY_TRAP = 0x1B, // Temporarily disable opponent abilities
   FREEZE = 0x1C, // Give Freeze condition
   ANTI_ABNORMALITY_1 = 0x1D, // Cure all abnormal conditions
-  UNKNOWN_1E = 0x1E,
+  PHYSICAL_HALVE_HP = 0x1E,
   EXPLOSION = 0x1F, // Damage all SCs and FCs by number of this same card set * 2
-  UNKNOWN_20 = 0x20,
-  UNKNOWN_21 = 0x21,
-  UNKNOWN_22 = 0x22,
+  LOW_COST_RAMPAGE = 0x20,
+  HIGH_COST_RAMPAGE = 0x21,
+  SET_TP = 0x22,
   RETURN_TO_DECK = 0x23, // Cancel discard and move to bottom of deck instead
   AERIAL = 0x24, // Give Aerial status
   AP_LOSS = 0x25, // Make attacker temporarily lose N AP during defense
@@ -232,12 +232,12 @@ enum class ConditionType : uint8_t {
   SWORD_SHIELD = 0x35, // Block attacks from Sword items
   GUN_SHIELD = 0x36, // Block attacks from Gun items
   CANE_SHIELD = 0x37, // Block attacks from Cane items
-  UNKNOWN_38 = 0x38,
-  UNKNOWN_39 = 0x39,
+  SET_DEF_POINTS = 0x38,
+  DEFENDER2 = 0x39,
   DEFENDER = 0x3A, // Make attacks go to setter of this card instead of original target
   SURVIVAL_DECOYS = 0x3B, // Redirect damage for multi-sided attack
   GIVE_OR_TAKE_EXP = 0x3C, // Give N EXP, or take if N is negative
-  UNKNOWN_3D = 0x3D,
+  SET_AP = 0x3D,
   DEATH_COMPANION = 0x3E, // If this card has 1 or 2 HP, set its HP to N
   EXP_DECOY = 0x3F, // If defender has EXP, lose EXP instead of getting damage when attacked
   SET_MV = 0x40, // Set MV to N
@@ -246,10 +246,10 @@ enum class ConditionType : uint8_t {
   GUARD_CREATURE = 0x43, // Attacks on controlling SC damage this card instead
   TECH = 0x44, // Technique cards cost 1 fewer ATK point
   BIG_SWING = 0x45, // Increase all attacking ATK costs by 1
-  UNKNOWN_46 = 0x46,
+  IMMORTALITY = 0x46,
   SHIELD_WEAPON = 0x47, // Limit attacker's choice of target to guard items
   ATK_DICE_BOOST = 0x48, // Increase ATK dice roll by 1
-  UNKNOWN_49 = 0x49,
+  COPY_CONDITIONS_TO_ATTACKER = 0x49,
   MAJOR_PIERCE = 0x4A, // If SC has over half of max HP, attacks target SC instead of equipped items
   HEAVY_PIERCE = 0x4B, // If SC has 3 or more items equipped, attacks target SC instead of equipped items
   MAJOR_RAMPAGE = 0x4C, // If SC has over half of max HP, attacks target SC and all equipped items
@@ -257,8 +257,8 @@ enum class ConditionType : uint8_t {
   AP_GROWTH = 0x4E, // Permanently increase AP by N
   TP_GROWTH = 0x4F, // Permanently increase TP by N
   REBORN = 0x50, // If any card of type N is on the field, this card goes back to the hand when destroyed
-  COPY = 0x51, // Temporarily set AP/TP to N percent (or 100% if N is 0) of opponent's values
-  UNKNOWN_52 = 0x52,
+  COPY = 0x51, // Temporarily set AP/TP to 100% percent (or 50% if N <= 50) of opponent's values
+  DICE_BOOST_MULTIPLIER = 0x52,
   MISC_GUARDS = 0x53, // Add N to card's defense value
   AP_OVERRIDE = 0x54, // Set AP to N temporarily
   TP_OVERRIDE = 0x55, // Set TP to N temporarily
@@ -266,22 +266,22 @@ enum class ConditionType : uint8_t {
   A_T_SWAP_PERM = 0x57, // Permanently swap AP and TP
   A_H_SWAP_PERM = 0x58, // Permanently swap AP and HP
   SLAYERS_ASSASSINS = 0x59, // Temporarily increase AP during attack
-  ANTI_ABNORMALITY_2 = 0x5A, // Remove all conditions
+  ANTI_ABNORMALITY_2 = 0x5A, // Block all abnormal conditions
   FIXED_RANGE = 0x5B, // Use SC's range instead of weapon or attack card ranges
   ELUDE = 0x5C, // SC does not lose HP when equipped items are destroyed
   PARRY = 0x5D, // Forward attack to random FC within one tile of original target, except attacker and original target
   BLOCK_ATTACK = 0x5E, // Completely block attack
-  UNKNOWN_5F = 0x5F,
-  UNKNOWN_60 = 0x60,
+  OVERRIDE_DAMAGE_BY_GIVER = 0x5F,
+  OVERRIDE_DAMAGE_BY_CARD = 0x60,
   COMBO_TP = 0x61, // Gain TP equal to the number of cards of type N on the field
   MISC_AP_BONUSES = 0x62, // Temporarily increase AP by N
   MISC_TP_BONUSES = 0x63, // Temporarily increase TP by N
-  UNKNOWN_64 = 0x64,
+  ATTACK_BONUS_IF_ALL_TARGETS_MATCH = 0x64,
   MISC_DEFENSE_BONUSES = 0x65, // Decrease damage by N
   MOSTLY_HALFGUARDS = 0x66, // Reduce damage from incoming attack by N
   PERIODIC_FIELD = 0x67, // Swap immunity to tech or physical attacks
   FC_LIMIT_BY_COUNT = 0x68, // Change FC limit from 8 ATK points total to 4 FCs total
-  UNKNOWN_69 = 0x69,
+  FREE_SET = 0x69, // Card can be set for free
   MV_BONUS = 0x6A, // Increase MV by N
   FORWARD_DAMAGE = 0x6B,
   WEAK_SPOT_INFLUENCE = 0x6C, // Temporarily decrease AP by N
@@ -291,11 +291,11 @@ enum class ConditionType : uint8_t {
   TP_SILENCE = 0x70, // Temporarily decrease TP of opponent by N
   A_T_SWAP = 0x71, // Temporarily swap AP and TP
   HALFGUARD = 0x72, // Halve damage from attacks that would inflict N or more damage
-  UNKNOWN_73 = 0x73,
+  STRONG_HIT_BLOCK = 0x73,
   RAMPAGE_AP_LOSS = 0x74, // Temporarily reduce AP by N
   UNKNOWN_75 = 0x75,
   REFLECT = 0x76, // Generate reverse attack
-  UNKNOWN_77 = 0x77,
+  DESTROY_ATTACKER_AND_TARGETS = 0x77,
   ANY = 0x78, // Not a real condition; used as a wildcard in search functions. Has value 0x64 on NTE
   UNKNOWN_79 = 0x79,
   UNKNOWN_7A = 0x7A,
@@ -615,7 +615,8 @@ struct CardDefinition {
   //   [4] = 0x00000000 => ----- (the card itself is in the center of this row)
   //   [5] = 0x00000000 => -----
   // The two special cases are as follows:
-  // 1. If all six values in the range array are 0x000FFFFF, then the card's range is the entire field.
+  // 1. If all six values in the range array are 0x000FFFFF, then the card's range is the entire field. (The client
+  //    only checks the first one.)
   // 2. If the cell corresponding to the card itself ((range[4] >> 8) & 0x0F) is not zero, then the rest of the range
   //    array is ignored and the card's range comes from a fixed set of ranges instead. See decode_range() for details.
   /* 0070 */ parray<be_uint32_t, 6> range;
@@ -833,7 +834,7 @@ struct DeckDefinition {
   /* 80 */ uint8_t hour;
   /* 81 */ uint8_t minute;
   /* 82 */ uint8_t second;
-  /* 83 */ uint8_t unknown_a2;
+  /* 83 */ uint8_t unused;
   /* 84 */
 } __packed_ws__(DeckDefinition, 0x84);
 
@@ -993,7 +994,13 @@ struct Rules {
   // These fields specify override dice ranges for the 1-player team in 2v1.
   /* 0E */ uint8_t atk_dice_value_range_2v1 = 0; // High 4 bits = min, low 4 = max
   /* 0F */ uint8_t def_dice_value_range_2v1 = 0; // High 4 bits = min, low 4 = max
-  /* 10 */ parray<uint8_t, 4> unused;
+  // lone_player overrides team assignment, putting the specified player on a team by themself against all other
+  // players. The values are:
+  //   0 = no override (default)
+  //   1-4 = player in counter slot 0-3 (respectively) is on a team by themself
+  //   5-8 = player with client ID 0-3 (respectively) is on a team by themself
+  /* 10 */ uint8_t lone_player = 0;
+  /* 11 */ parray<uint8_t, 3> unused;
   /* 14 */
 
   Rules() = default;
@@ -1195,8 +1202,8 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   //   03, 04 = team A start (2v2) (can be redefined by start_tile_definitions)
   //   06, 07 = team B start (2v2) (can be redefined by start_tile_definitions)
   //   08 = team B start (1v1) (can be redefined by start_tile_definitions)
-  // Note that the game displays the map reversed vertically in the preview window. For example, player 1 is on team A,
-  // which usually starts at the top of the map as defined in this struct, or at the bottom as shown in the preview.
+  // Note that the game displays the map reversed vertically in the preview window. For example, team A, which usually
+  // starts at the top of the map as defined in this struct, would appear at the bottom as shown in the preview.
   /* 000C */ parray<parray<uint8_t, 0x10>, 0x10> map_tiles;
 
   // The start_tile_definitions field is a list of 6 bytes for each team. The low 6 bits of each byte match the
@@ -1204,6 +1211,10 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   // - If the team has 1 player, only byte [0] is used.
   // - If the team has 2 players, bytes [1] and [2] are used.
   // - If the team has 3 players, bytes [3] through [5] are used.
+  // Note that the game's preview window ignores this, so if the standard values (described above, on map_tiles) are
+  // not used, then the preview window when selecting a map will not match where players are actually placed when the
+  // battle starts. On Trial Edition, the preview window places players on tiles matching 03 and 04 for team A, and 07
+  // and 08 for team B; on all other Episode 3 builds, team B is assumed to be 06 and 07 instead.
   /* 010C */ parray<parray<uint8_t, 6>, 2> start_tile_definitions;
 
   struct CameraSpec {
@@ -1263,19 +1274,18 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
 
   // These are not quite the same format as the entries in aiprm.dat. These entries are only used if the corresponding
   // NPC exists (if .name[0] is not 0) and if the corresponding entry in the npc_ai_params_entry_index is -1.
+  /* 20F0 */ parray<be_uint16_t, 3> npc_unknown_a1;
+  /* 20F6 */ parray<uint8_t, 2> unknown_n1;
   struct AIParams {
-    /* 0000 */ parray<be_uint16_t, 2> unknown_a1;
-    /* 0004 */ uint8_t is_arkz;
-    /* 0005 */ parray<uint8_t, 3> unknown_a2;
-    /* 0008 */ pstring<TextEncoding::MARKED, 0x10> ai_name;
+    /* 0000 */ pstring<TextEncoding::MARKED, 0x10> ai_name;
     // TODO: Figure out exactly how these are used and document here.
-    /* 0018 */ parray<be_uint16_t, 0x7E> params;
+    /* 0010 */ parray<be_int16_t, 0x80> params;
+    /* 0110 */ uint8_t is_arkz;
+    /* 0111 */ parray<uint8_t, 3> unknown_a2;
     /* 0114 */
     phosg::JSON json(Language language) const;
   } __packed_ws__(AIParams, 0x114);
-  /* 20F0 */ parray<AIParams, 3> npc_ai_params; // Unused if ai_name[0] == 0
-
-  /* 242C */ parray<uint8_t, 8> unknown_a7;
+  /* 20F8 */ parray<AIParams, 3> npc_ai_params; // Unused if ai_name[0] == 0
 
   // This array specifies which set of predefined AI parameters (in aiprm.dat) to use for each NPC. If a value in this
   // array is -1 (FFFFFFFF), then the corresponding NPC's AI parameters are defined in the AIParams structure above.
@@ -1410,6 +1420,12 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
     return (this->map_category <= 2);
   }
 
+  static void rewrite_map_tiles_for_preview(
+      parray<parray<uint8_t, 0x10>, 0x10>& dest_map_tiles,
+      const parray<parray<uint8_t, 0x10>, 0x10>& src_map_tiles,
+      const parray<parray<uint8_t, 6>, 2>& start_tile_definitions,
+      bool is_nte);
+
   // This function throws runtime_error if the passed-in map is not semantically equivalent to *this. Semantic
   // equivalence means all fields that affect gameplay and visuals are equivalent, but dialogue, names, and description
   // text may differ.
@@ -1442,8 +1458,9 @@ struct MapDefinitionTrial {
   /* 1FDC */ be_uint16_t map_x;
   /* 1FDE */ be_uint16_t map_y;
   /* 1FE0 */ parray<MapDefinition::NPCDeck, 3> npc_decks;
-  /* 20E8 */ parray<MapDefinition::AIParams, 3> npc_ai_params;
-  /* 2424 */ parray<uint8_t, 8> unknown_a7;
+  /* 20E8 */ parray<be_uint16_t, 3> npc_unknown_a1;
+  /* 20EE */ parray<uint8_t, 2> unknown_n1;
+  /* 20F0 */ parray<MapDefinition::AIParams, 3> npc_ai_params;
   /* 242C */ parray<be_int32_t, 3> npc_ai_params_entry_index;
   /* 2438 */ pstring<TextEncoding::MARKED, 0x190> before_message;
   /* 25C8 */ pstring<TextEncoding::MARKED, 0x190> after_message;
@@ -1471,6 +1488,8 @@ struct COMDeckDefinition {
   std::string player_name;
   std::string deck_name;
   parray<le_uint16_t, 0x1F> card_ids;
+  int8_t ai_params_index;
+  uint16_t player_level;
 
   phosg::JSON json() const;
 };

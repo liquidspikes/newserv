@@ -52,15 +52,21 @@ void TeamIndex::Team::load_config() {
   auto json = phosg::JSON::parse(phosg::load_file(this->json_filename()));
   this->name = json.get_string("Name");
   this->spent_points = json.get_int("SpentPoints");
-  this->points = 0;
   for (const auto& member_it : json.get_list("Members")) {
     Member m(*member_it);
-    this->points += m.points;
     uint32_t account_id = m.account_id;
     if (m.check_flag(Member::Flag::IS_MASTER)) {
       this->master_account_id = account_id;
     }
     this->members.emplace(account_id, std::move(m));
+  }
+  if (json.contains("Points")) {
+    this->points = json.get_int("Points");
+  } else {
+    this->points = 0;
+    for (const auto& [_, m] : this->members) {
+      this->points += m.points;
+    }
   }
   try {
     for (const auto& it : json.get_list("RewardKeys")) {
@@ -82,6 +88,7 @@ phosg::JSON TeamIndex::Team::json() const {
   }
   return phosg::JSON::dict({
       {"Name", this->name},
+      {"Points", this->points},
       {"SpentPoints", this->spent_points},
       {"Members", std::move(members_json)},
       {"RewardKeys", std::move(reward_keys_json)},
@@ -319,7 +326,7 @@ std::shared_ptr<const TeamIndex::Team> TeamIndex::create(
   m.set_flag(Team::Member::Flag::IS_MASTER);
   team->members.emplace(master_account_id, std::move(m));
   team->name = name;
-
+  team->master_account_id = master_account_id;
   team->save_config();
   this->add_to_indexes(team);
   return team;
@@ -357,10 +364,13 @@ void TeamIndex::add_member(uint32_t team_id, uint32_t account_id, const std::str
   team->save_config();
 }
 
-void TeamIndex::remove_member(uint32_t account_id) {
+void TeamIndex::remove_member(uint32_t team_id, uint32_t account_id) {
   auto team_it = this->account_id_to_team.find(account_id);
   if (team_it == this->account_id_to_team.end()) {
     throw std::runtime_error("client is not in any team");
+  }
+  if (team_it->second->team_id != team_id) {
+    throw std::runtime_error("client is not in the specified team");
   }
   auto team = std::move(team_it->second);
   this->account_id_to_team.erase(team_it);
