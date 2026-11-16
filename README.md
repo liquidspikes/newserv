@@ -2,7 +2,7 @@
 
 newserv is a game server, proxy, and reverse-engineering tool for Phantasy Star Online (PSO). **To quickly get started using newserv, just read the [server setup](#server-setup) and [how to connect](#how-to-connect) sections.**
 
-This project includes code that was reverse-engineered by the community in ages long past, and has been included in many projects since then. It also includes some game data from Phantasy Star Online itself, which was originally created by Sega.
+All reverse-engineering in this project is based on inspecting network sessions from the game during its official support period, as well as disassembling publicly-available game clients. The author has no access to Sega's source code or any other private data.
 
 Feel free to submit GitHub issues if you find bugs or have feature requests. I'd like to make the server as stable and complete as possible, but I can't promise that I'll respond to issues in a timely manner, because this is a personal project undertaken primarily for the fun of reverse-engineering. If you want to contribute to newserv yourself, pull requests are welcome as well.
 
@@ -55,7 +55,7 @@ At the time of its inception, Aeon was also called newserv, and you may find som
 
 Independently of this project, there are many other PSO servers out there. Those that I know of that are (or were) public are listed here in approximate chronological order:
 
-* (Early 2000s) **[Schtserv](https://schtserv.com/)**: The first public-access PSO server, written in Delphi by Schthack. Schtserv is the only other unofficial server to support Episode 3, their implementation of which is based on newserv's (which is based on Sega's).
+* (Early 2000s) **[Schtserv](https://schtserv.com/)**: The first public-access PSO server, written in Delphi by Schthack. Schtserv is the only other unofficial server to support Episode 3, their implementation of which is based on newserv's (which itself is based on Sega's embedded server code in the GC client).
 * (2005) **Khyller**: An early attempt of mine to support PSO PC, GC, and BB. See above for more details.
 * (2006) **Aeon**: My second attempt. Better than Khyller, but still unreliable.
 * (2008) **Tethealla**: A fairly extensive implementation of PSOBB, written in C by Sodaboy. The public version of Tethealla has been [officially disowned](https://www.pioneer2.net/community/threads/tethealla-server-forums-removal.26365/) as it is now more than 15 years old, but closed-source development continues. [Ephinea](https://ephinea.pioneer2.net/) is the continuation of this project. Several other modern PSOBB servers are forks of the initial public version of Tethealla as well.
@@ -117,19 +117,19 @@ There are a few version-specific quirks to be aware of:
 
 ## Server setup
 
-Currently newserv works on macOS, Windows, and Ubuntu Linux. It will likely work on other Linux flavors too.
+Currently newserv works on macOS, Windows, and Ubuntu Linux. It likely works on other Linux flavors too, but is only tested in CI on Ubuntu.
 
 ### Windows/macOS
 
 1. Download the latest release.zip file from the [releases page](https://github.com/fuzziqersoftware/newserv/releases).
 2. Extract the contents of the archive to some location on your computer.
-3. Go into the system/ folder, open config.json in a text editor, and edit it to your liking. There are comments in the file that describe what all the options do. Most of the options can be left alone if you want default behavior, but on Windows, you must change LocalAddress and ExternalAddress.
+3. Go into the system/ folder, open config.json in a text editor, and edit it to your liking. There are comments in the file that describe what all the options do. Most of the options can be left alone if you want default behavior, but on Windows, you must at least change LocalAddress.
 4. (Optional) If you plan to play Blue Burst on newserv, set up the patch directory. See [client patch directories](#client-patch-directories) for details.
 5. Run the newserv executable.
 
 ### Linux
 
-There are currently no precompiled releases for Linux. To run newserv on Linux, you'll have to build it from source - see the section below.
+There are no precompiled releases for Linux. To run newserv on Linux, you'll have to build it from source - see the section below.
 
 ### Building from source (macOS/Linux)
 
@@ -155,7 +155,7 @@ The current version of newserv is cross-compiled using mingw-w64 on a macOS buil
 
 Here is a rough outline of the Windows build process. You should only attempt this yourself if you're familiar with setting up build environments and can deal with issues you may encounter along the way.
 1. Install recent versions of MinGW and CMake.
-2. Build and install zlib, libiconv, asio, phosg, and resource_dasm into your MinGW environment.
+2. Build and install zlib, libiconv, asio, phosg, and resource_dasm into your MinGW environment. (You do not need to install SDL; resource_dasm's dependency on SDL is optional.)
 3. Clone the newserv repository with symlinks enabled: `git clone -c core.symlinks=true https://github.com/fuzziqersoftware/newserv.git`
 4. Build newserv via CMake.
 
@@ -470,6 +470,7 @@ The specific versions are:
 | PSO PC (v2) 04/2002          | 2OJW | Client functions not supported |
 | PSO PC (v2) 02/2003          | 2OJZ | Client functions not supported |
 | PSO GC Trial Edition         | 3OJT | PowerPC                        |
+| PSO GC GameJam demo          | 3OJD | PowerPC (2)                    |
 | PSO GC v1.2 JP               | 3OJ2 | PowerPC                        |
 | PSO GC v1.3 JP               | 3OJ3 | PowerPC                        |
 | PSO GC v1.4 (Plus) JP        | 3OJ4 | PowerPC                        |
@@ -477,10 +478,12 @@ The specific versions are:
 | PSO GC v1.0 US               | 3OE0 | PowerPC                        |
 | PSO GC v1.1 US               | 3OE1 | PowerPC                        |
 | PSO GC v1.2 (Plus) US        | 3OE2 | PowerPC (1)                    |
+| PSO GC Return to Ragol       | 3OE2 | PowerPC (1)                    |
 | PSO GC v1.0 EU               | 3OP0 | PowerPC                        |
 | PSO GC Ep3 Trial Edition     | 3SJT | PowerPC                        |
 | PSO GC Ep3 JP                | 3SJ0 | PowerPC                        |
 | PSO GC Ep3 US                | 3SE0 | PowerPC (1)                    |
+| PSO GC Ep3 Plus              | 3SE0 | PowerPC (1)                    |
 | PSO GC Ep3 EU                | 3SP0 | PowerPC (1)                    |
 | PSO Xbox Beta                | 4OJB | x86                            |
 | PSO Xbox JP Disc             | 4OJD | x86                            |
@@ -496,6 +499,7 @@ The specific versions are:
 
 *Notes:*
 1. *Client functions are only supported on these versions if EnableSendFunctionCallQuestNumbers is set in config.json. See the comments there for more information.*
+2. *This version does not have online capability; it's included in the list only for completeness.*
 
 newserv comes with a set of patches for many of the above versions, in system/client-functions/.
 
@@ -532,7 +536,7 @@ There are many options available when starting a proxy session. All options are 
     * Online quests and download quests (saved as .bin/.dat files)
     * GBA games (saved as .gba files)
     * Client functions / patches (saved as .bin files and disassembled as .txt files)
-    * Player, system, and Guild Card data from BB sessions (saved as .psochar, .psosys, .psosysteam, and .psocard files)
+    * Player, system, and Guild Card data from BB sessions (saved as .psochar, .psosys, .psosystem, and .psocard files)
     * Stream file data from BB sessions (saved as ItemPMT, BattleParamEntry, ItemMagEdit, and PlyLevelTbl files)
     * Episode 3 online quests and maps (saved as .mnmd files)
     * Episode 3 download quests (saved as .mnm files)
@@ -578,7 +582,7 @@ Some commands only work for clients not in proxy sessions. The chat commands are
         * You'll see the rare seed value and floor variations when you join a game.
         * You'll be placed into the last available slot in lobbies and games instead of the first, unless you're joining a BB solo-mode game.
         * You'll be able to run any client function with `$patch`, not only those that are marked visible.
-        * You'll be able to start any quest using `$quest`, not only those that explicitly allow it. You'll also be able ot use `$quest` when there are other players in the game.
+        * You'll be able to start any quest using `$quest`, not only those that explicitly allow it. You'll also be able to use `$quest` when there are other players in the game.
         * You'll be able to join games with any PSO version, not only those for which cross-version play is normally enabled. See the "Cross-version play" section above for details on this.
     * `$readmem <address>`: Read 4 bytes from the given address and show you the values.
     * `$writemem <address> <data>`: Write data to the given address. Data is not required to be any specific size.
@@ -632,7 +636,8 @@ Some commands only work for clients not in proxy sessions. The chat commands are
 * Episode 3 commands (non-proxy only)
     * `$spec`: Toggle the allow spectators flag for Episode 3 games. If any players are spectating when this flag is disabled, they are sent back to the lobby.
     * `$inftime`: Toggle infinite-time mode. Must be used before starting a battle. If infinite-time mode is on, the overall and per-phase time limits will be disabled regardless of the values chosen during battle rules setup. After completing a battle, infinite-time mode is reset to the server's default value (which can be set in Episode3BehaviorFlags in config.json).
-    * `$dicerange [d:L-H] [1:L-H] [a1:L-H] [d1:L-H]`: Set override dice ranges for the next battle. The min and max dice values from the rules setup menu always apply to the ATK dice, but you can specify a different range for the DEF dice with `d:2-4` (for example). The `1:` override applies to the 1-player team in a 2v1 game (so you would set the 2-player team's desired dice range in the rules menu). You can also specify the 1-player team's ATK and DEF ranges separately with the `a1:` and `d1:` overrides. Note that these ranges will only be used if the chosen map or quest does not override them.
+    * `$dicerange [d:L-H] [1:L-H] [a1:L-H] [d1:L-H]`: Set override dice ranges for the next battle. The min and max dice values from the rules setup menu always apply to the ATK dice, but you can specify a different range for the DEF dice with `d:2-4` (for example). The `1:` override applies to the 1-player team in a 2v1 or 3v1 game (so you would set the larger team's desired dice range in the rules menu). You can also specify the 1-player team's ATK and DEF ranges separately with the `a1:` and `d1:` overrides. Note that these ranges will only be used if the chosen map or quest does not override them.
+    * `$lone [who]`: Enable unbalanced teams. If `who` is `me`, you will be on a team by yourself, and all other players in the game will be your opponents. If `who` is a number 1-4, whoever is in the corresponding slot at the battle setup counter will on a team by themself (this is necessary if you want to gang up on a COM player). If `who` is omitted, the override is deleted, and teams will be assigned as normal.
     * `$stat <what>`: Show a statistic about your player or team in the current battle. `<what>` can be `duration`, `fcs-destroyed`, `cards-destroyed`, `damage-given`, `damage-taken`, `opp-cards-destroyed`, `own-cards-destroyed`, `move-distance`, `cards-set`, `fcs-set`, `attack-actions-set`, `techs-set`, `assists-set`, `defenses-self`, `defenses-ally`, `cards-drawn`, `max-attack-damage`, `max-combo`, `attacks-given`, `attacks-taken`, `sc-damage`, `damage-defended`, or `rank`.
     * `$surrender`: Cause your team to immediately lose the current battle. If your story character is already defeated, you can't surrender - only your teammate can.
     * `$saverec <name>`: Save the recording of the last battle.

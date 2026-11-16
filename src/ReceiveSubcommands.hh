@@ -19,18 +19,19 @@ G_SpecializableItemDropRequest_6xA2 normalize_drop_request(const void* data, siz
 
 struct DropReconcileResult {
   std::shared_ptr<MapState::ObjectState> obj_st;
-  // The ref ene_st is the one the client referenced in the drop request; the target ene_st is the one actually used
-  // for drop computation (which may be the result of following an alias from the ref ene_st)
+  // ref_ene_st is the one the client referenced in the drop request; target_ene_st is the one actually used for drop
+  // computation (which may be the result of following an alias from ref_ene_st)
   std::shared_ptr<MapState::EnemyState> ref_ene_st;
   std::shared_ptr<MapState::EnemyState> target_ene_st;
-  EnemyType effective_enemy_type;
-  bool should_drop;
-  bool ignore_def;
+  EnemyType effective_enemy_type = EnemyType::UNKNOWN;
+  uint8_t effective_area = 0;
+  bool should_drop = true;
+  bool ignore_def = true;
 };
 
 DropReconcileResult reconcile_drop_request_with_map(
     std::shared_ptr<Client> c,
-    G_SpecializableItemDropRequest_6xA2& cmd,
+    const G_SpecializableItemDropRequest_6xA2& cmd,
     Difficulty difficulty,
     uint8_t event,
     std::shared_ptr<MapState> map,
@@ -56,7 +57,7 @@ public:
   Language language = Language::JAPANESE;
   uint32_t player_tag = 0;
   uint32_t guild_card_number = 0;
-  uint32_t unknown_a6 = 0;
+  uint32_t battle_enabled = 0;
   uint32_t battle_team_number = 0;
   G_6x70_Sub_Telepipe telepipe;
   uint32_t death_flags = 0;

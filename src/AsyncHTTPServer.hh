@@ -70,7 +70,7 @@ public:
   int code;
 };
 
-class HTTPClient {
+class HTTPClient : public std::enable_shared_from_this<HTTPClient> {
 public:
   AsyncSocketReader r;
   uint64_t last_communication_time = 0;
@@ -83,8 +83,19 @@ public:
   asio::awaitable<void> send_http_response(const HTTPResponse& resp);
 
   asio::awaitable<WebSocketMessage> recv_websocket_message(size_t max_data_size);
-  asio::awaitable<void> send_websocket_message(const void* data, size_t size, uint8_t opcode = 0x01);
-  asio::awaitable<void> send_websocket_message(const std::string& data, uint8_t opcode = 0x01);
+  void send_websocket_message(std::string&& data, uint8_t opcode = 0x01);
+  void send_websocket_message(std::shared_ptr<const std::string> data, uint8_t opcode = 0x01);
+
+  void enable_websockets();
+  void disconnect();
+
+protected:
+  std::deque<std::variant<std::string, std::shared_ptr<const std::string>>> outbound_data;
+  bool should_disconnect = false;
+  AsyncEvent send_buffer_nonempty_signal;
+
+  static std::string generate_websocket_message_header(uint8_t opcode, size_t size);
+  static asio::awaitable<void> websocket_send_task(std::shared_ptr<HTTPClient> client);
 };
 
 template <typename RetT, typename ClientT>
@@ -126,6 +137,7 @@ public:
   struct Route {
     HTTPRequest::Method method;
     std::vector<std::string> path_tokens;
+    ssize_t json_max_depth; // Only used for POST
     Handler handler;
   };
 
@@ -137,9 +149,19 @@ public:
     return path_tokens;
   }
 
-  void add(HTTPRequest::Method method, const std::string& path_pattern, Handler handler) {
+  void add_GET(const std::string& path_pattern, Handler handler) {
     this->routes.emplace_back(Route{
-        .method = method, .path_tokens = this->split_and_normalize_path(path_pattern), .handler = handler});
+        .method = HTTPRequest::Method::GET,
+        .path_tokens = this->split_and_normalize_path(path_pattern),
+        .json_max_depth = -1,
+        .handler = handler});
+  }
+  void add_POST(const std::string& path_pattern, ssize_t json_max_depth, Handler handler) {
+    this->routes.emplace_back(Route{
+        .method = HTTPRequest::Method::POST,
+        .path_tokens = this->split_and_normalize_path(path_pattern),
+        .json_max_depth = json_max_depth,
+        .handler = handler});
   }
 
   asio::awaitable<RetT> call_handler(std::shared_ptr<ClientT> c, const HTTPRequest& req) {
@@ -172,7 +194,7 @@ public:
             throw HTTPError(400, "POST requests must use the application/json content type");
           }
           try {
-            args.post_data = phosg::JSON::parse(req.data);
+            args.post_data = phosg::JSON::parse(req.data, false, route.json_max_depth);
           } catch (const std::exception& e) {
             throw HTTPError(400, std::format("Invalid JSON: {}", e.what()));
           }
@@ -261,7 +283,17 @@ protected:
     }
 
     auto connection_header = req.get_header("connection");
-    if (!connection_header || phosg::tolower(*connection_header) != "upgrade") {
+    if (!connection_header) {
+      co_return false;
+    }
+    bool upgrade_present = false;
+    for (std::string& token : phosg::split(*connection_header, ',')) {
+      phosg::strip_whitespace(token);
+      if (phosg::tolower(token) == "upgrade") {
+        upgrade_present = true;
+      }
+    }
+    if (!upgrade_present) {
       co_return false;
     }
     auto upgrade_header = req.get_header("upgrade");
@@ -284,7 +316,7 @@ protected:
     resp.headers.emplace("Sec-WebSocket-Accept", std::move(sec_websocket_accept));
     co_await c->send_http_response(resp);
 
-    c->is_websocket = true;
+    c->enable_websockets();
     co_return true;
   }
 
@@ -293,7 +325,7 @@ protected:
     return std::make_shared<ClientT>(std::move(client_sock));
   }
 
-  // handle_request must do one of the following three things:
+  // handle_request must do exactly one of the following three things:
   // 1. Return an HTTP response.
   // 2. Call enable_websockets, and if it returns true, return nullptr. After this point, handle_request will not be
   //    called again for this client; handle_websocket_message will be called instead when any WebSocket messages are
@@ -307,6 +339,18 @@ protected:
   virtual asio::awaitable<void> handle_client(std::shared_ptr<ClientT> c) {
     asio::steady_timer idle_timer(*this->io_context);
     while (c->r.get_socket().is_open()) {
+      size_t idle_usecs_limit = c->is_websocket
+          ? this->limits.max_websocket_idle_usecs
+          : this->limits.max_http_keepalive_idle_usecs;
+      if (idle_usecs_limit && c->r.get_socket().is_open()) {
+        idle_timer.expires_after(std::chrono::microseconds(idle_usecs_limit));
+        idle_timer.async_wait([c](std::error_code ec) {
+          if (!ec) {
+            c->r.close();
+          }
+        });
+      }
+
       if (c->is_websocket) {
         WebSocketMessage msg = co_await c->recv_websocket_message(this->limits.max_websocket_message_size);
         idle_timer.cancel();
@@ -341,19 +385,12 @@ protected:
           }
         }
       }
-
-      size_t idle_usecs_limit = c->is_websocket
-          ? this->limits.max_websocket_idle_usecs
-          : this->limits.max_http_keepalive_idle_usecs;
-      if (idle_usecs_limit && c->r.get_socket().is_open()) {
-        idle_timer.expires_after(std::chrono::microseconds(idle_usecs_limit));
-        idle_timer.async_wait([c](std::error_code ec) {
-          if (!ec) {
-            c->r.close();
-          }
-        });
-      }
     }
     idle_timer.cancel();
+  }
+
+  virtual asio::awaitable<void> destroy_client(std::shared_ptr<ClientT> c) {
+    c->disconnect();
+    co_return;
   }
 };

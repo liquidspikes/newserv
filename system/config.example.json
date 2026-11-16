@@ -24,9 +24,9 @@
   // username in the $SUDO_USER environment variable instead. This option has no effect on Windows.
   // "User": "$SUDO_USER",
 
-  // Number of threads to use for CPU-intensive work. This value must be at least 1, and should generally not be more
-  // than the number of CPUs in the system.
-  "WorkerThreads": 1,
+  // Number of threads to use for CPU-intensive work. If set to 0, the server will use one fewer thread than there are
+  // CPUs in the system (since the event thread is not included in this count).
+  "WorkerThreads": 0,
 
   // Address to connect local clients to (IP address or interface name). This is the address that newserv will expect
   // clients on the same network as the server to connect to.
@@ -98,7 +98,7 @@
   // can use to connect.
   "PPPRawListen": [5057],
 
-  // Where to listen for HTTP connections. The HTTP server is intended as a private interface to interact with newserv
+  // Where to listen for HTTP API connections. The HTTP API is intended as a private interface to interact with newserv
   // from e.g. an in-house Web portal or Discord bot. It would be unwise to expose any of these ports to the public
   // Internet (hence why the default here is blank). The format of entries in this list is the same as for
   // IPStackListen and PPPStackListen.
@@ -1161,6 +1161,15 @@
   // Default switch assist behavior. Players can always toggle switch assist with the $swa command; this only controls
   // whether it's enabled by default for all players or not.
   "EnableSwitchAssistByDefault": false,
+
+  // Whether to sell all common recovery items in BB tool shops at all levels. By default, the tool shop's contents
+  // depend on the player's level (for example, Monomates aren't sold to players at level 43 or above), as in the
+  // original game. If this is enabled, the tool shop always sells all of the common items (Monomate, Dimate, Trimate,
+  // Monofluid, Difluid, Trifluid, Antidote, Antiparalysis, Sol Atomizer, Moon Atomizer, Star Atomizer, Telepipe, and
+  // Trap Vision). The client can't handle more than 18 items in the tool shop, so there will be fewer technique disks
+  // for sale (at most 5, instead of up to 7) to make room for the extra recovery items. This is a server-side change
+  // only; no client patch is needed.
+  "BBExtendedToolShop": false,
 
   // Whether to enable rare drop notifications by default. Players can toggle this behavior for themselves with the
   // $itemnotifs command.

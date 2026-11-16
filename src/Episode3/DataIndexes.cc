@@ -322,7 +322,7 @@ struct ConditionDescription {
   const char* description;
 };
 
-static const std::vector<ConditionDescription> description_for_condition_type({
+static const std::vector<ConditionDescription> description_for_condition_type{
     /* 0x00 */ {false, "NONE", nullptr},
     /* 0x01 */ {true, "AP_BOOST", "Temporarily increase AP"},
     /* 0x02 */ {false, "RAMPAGE", "Rampage"},
@@ -353,11 +353,11 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x1B */ {false, "ABILITY_TRAP", "Temporarily disable opponent abilities"},
     /* 0x1C */ {false, "FREEZE", "Give Freeze condition"},
     /* 0x1D */ {false, "ANTI_ABNORMALITY_1", "Cure all conditions"},
-    /* 0x1E */ {false, "UNKNOWN_1E", nullptr},
+    /* 0x1E */ {false, "PHYSICAL_HALVE_HP", "Halves HP on physical attack"},
     /* 0x1F */ {false, "EXPLOSION", "Damage all SCs and FCs by number of this same card set * 2"},
-    /* 0x20 */ {false, "UNKNOWN_20", nullptr},
-    /* 0x21 */ {false, "UNKNOWN_21", nullptr},
-    /* 0x22 */ {false, "UNKNOWN_22", nullptr},
+    /* 0x20 */ {false, "LOW_COST_RAMPAGE", "Rampage affecting only FCs that cost 3 or less"},
+    /* 0x21 */ {false, "HIGH_COST_RAMPAGE", "Rampage affecting only FCs that cost more than 3"},
+    /* 0x22 */ {false, "SET_TP", "Set base TP to (expr)"},
     /* 0x23 */ {false, "RETURN_TO_DECK", "Cancel discard and move to bottom of deck instead"},
     /* 0x24 */ {false, "AERIAL", "Give Aerial status"},
     /* 0x25 */ {true, "AP_LOSS", "Make attacker temporarily lose N AP during defense"},
@@ -379,12 +379,12 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x35 */ {false, "SWORD_SHIELD", "Block attacks from Sword items"},
     /* 0x36 */ {false, "GUN_SHIELD", "Block attacks from Gun items"},
     /* 0x37 */ {false, "CANE_SHIELD", "Block attacks from Cane items"},
-    /* 0x38 */ {false, "UNKNOWN_38", nullptr},
-    /* 0x39 */ {false, "UNKNOWN_39", nullptr},
+    /* 0x38 */ {false, "SET_DEF_POINTS", "Set DEF dice value"},
+    /* 0x39 */ {false, "DEFENDER2", nullptr}, // TODO: Describe this
     /* 0x3A */ {false, "DEFENDER", "Make attacks go to setter of this card instead of original target"},
     /* 0x3B */ {false, "SURVIVAL_DECOYS", "Redirect damage for multi-sided attack"},
     /* 0x3C */ {true, "GIVE_OR_TAKE_EXP", "Give N EXP, or take if N is negative"},
-    /* 0x3D */ {false, "UNKNOWN_3D", nullptr},
+    /* 0x3D */ {false, "SET_AP", "Set base AP to (expr)"},
     /* 0x3E */ {false, "DEATH_COMPANION", "If this card has 1 or 2 HP, set its HP to N"},
     /* 0x3F */ {true, "EXP_DECOY", "If defender has EXP, lose EXP instead of getting damage when attacked"},
     /* 0x40 */ {true, "SET_MV", "Set MV to N"},
@@ -393,10 +393,10 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x43 */ {false, "GUARD_CREATURE", "Attacks on controlling SC damage this card instead"},
     /* 0x44 */ {false, "TECH", "Technique cards cost 1 fewer ATK point"},
     /* 0x45 */ {false, "BIG_SWING", "Increase all attacking ATK costs by 1"},
-    /* 0x46 */ {false, "UNKNOWN_46", nullptr},
+    /* 0x46 */ {false, "IMMORTALITY", "Prevents cards with card ID (expr) from being destroyed at 0 HP"},
     /* 0x47 */ {false, "SHIELD_WEAPON", "Limit attacker\'s choice of target to guard items"},
     /* 0x48 */ {false, "ATK_DICE_BOOST", "Increase ATK dice roll by 1"},
-    /* 0x49 */ {false, "UNKNOWN_49", nullptr},
+    /* 0x49 */ {false, "COPY_CONDITIONS_TO_ATTACKER", nullptr},
     /* 0x4A */ {false, "MAJOR_PIERCE", "If SC has over half of max HP, attacks target SC instead of equipped items"},
     /* 0x4B */ {false, "HEAVY_PIERCE", "If SC has 3 or more items equipped, attacks target SC instead of equipped items"},
     /* 0x4C */ {false, "MAJOR_RAMPAGE", "If SC has over half of max HP, attacks target SC and all equipped items"},
@@ -404,8 +404,8 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x4E */ {true, "AP_GROWTH", "Permanently increase AP"},
     /* 0x4F */ {true, "TP_GROWTH", "Permanently increase TP"},
     /* 0x50 */ {true, "REBORN", "If any card of type N is on the field, this card goes to the hand when destroyed instead of being discarded"},
-    /* 0x51 */ {true, "COPY", "Temporarily set AP/TP to N percent (or 100% if N is 0) of opponent\'s values"},
-    /* 0x52 */ {false, "UNKNOWN_52", nullptr},
+    /* 0x51 */ {true, "COPY", "Temporarily set AP/TP to 100% percent (or 50% if N <= 50) of opponent\'s values"},
+    /* 0x52 */ {false, "UNUSED_DICE_BOOST_MULTIPLIER", "Multiplies dice boost by (expr), but not implemented in engine"},
     /* 0x53 */ {true, "MISC_GUARDS", "Add N to card\'s defense value"},
     /* 0x54 */ {true, "AP_OVERRIDE", "Set AP to N temporarily"},
     /* 0x55 */ {true, "TP_OVERRIDE", "Set TP to N temporarily"},
@@ -413,22 +413,22 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x57 */ {false, "A_T_SWAP_PERM", "Permanently swap AP and TP"},
     /* 0x58 */ {false, "A_H_SWAP_PERM", "Permanently swap AP and HP"},
     /* 0x59 */ {true, "SLAYERS_ASSASSINS", "Temporarily increase AP during attack"},
-    /* 0x5A */ {false, "ANTI_ABNORMALITY_2", "Remove all conditions"},
+    /* 0x5A */ {false, "ANTI_ABNORMALITY_2", "Block all abnormal conditions"},
     /* 0x5B */ {false, "FIXED_RANGE", "Use SC\'s range instead of weapon or attack card ranges"},
     /* 0x5C */ {false, "ELUDE", "SC does not lose HP when equipped items are destroyed"},
     /* 0x5D */ {false, "PARRY", "Forward attack to a random FC within one tile of original target, excluding attacker and original target"},
     /* 0x5E */ {false, "BLOCK_ATTACK", "Completely block attack"},
-    /* 0x5F */ {false, "UNKNOWN_5F", nullptr},
-    /* 0x60 */ {false, "UNKNOWN_60", nullptr},
+    /* 0x5F */ {false, "OVERRIDE_DAMAGE_BY_GIVER", nullptr},
+    /* 0x60 */ {false, "OVERRIDE_DAMAGE_BY_CARD", nullptr},
     /* 0x61 */ {true, "COMBO_TP", "Gain TP equal to the number of cards of type N on the field"},
     /* 0x62 */ {true, "MISC_AP_BONUSES", "Temporarily increase AP"},
     /* 0x63 */ {true, "MISC_TP_BONUSES", "Temporarily increase TP"},
-    /* 0x64 */ {false, "UNKNOWN_64", nullptr},
+    /* 0x64 */ {false, "ATTACK_BONUS_IF_ALL_TARGETS_MATCH", nullptr},
     /* 0x65 */ {true, "MISC_DEFENSE_BONUSES", "Decrease damage"},
     /* 0x66 */ {true, "MOSTLY_HALFGUARDS", "Reduce damage from incoming attack"},
     /* 0x67 */ {false, "PERIODIC_FIELD", "Swap immunity to tech or physical attacks"},
     /* 0x68 */ {false, "FC_LIMIT_BY_COUNT", "Change FC limit from 8 ATK points total to 4 FCs total"},
-    /* 0x69 */ {false, "UNKNOWN_69", nullptr},
+    /* 0x69 */ {false, "FREE_SET", "Card can be set for free"},
     /* 0x6A */ {true, "MV_BONUS", "Increase MV"},
     /* 0x6B */ {true, "FORWARD_DAMAGE", "Give N damage back to attacker during defense (?) (TODO)"},
     /* 0x6C */ {true, "WEAK_SPOT_INFLUENCE", "Temporarily decrease AP"},
@@ -438,18 +438,18 @@ static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x70 */ {true, "TP_SILENCE", "Temporarily decrease TP of opponent"},
     /* 0x71 */ {false, "A_T_SWAP", "Temporarily swap AP and TP"},
     /* 0x72 */ {true, "HALFGUARD", "Halve damage from attacks that would inflict N or more damage"},
-    /* 0x73 */ {false, "UNKNOWN_73", nullptr},
+    /* 0x73 */ {false, "STRONG_HIT_BLOCK", "Block all attacks of N damage or more"},
     /* 0x74 */ {true, "RAMPAGE_AP_LOSS", "Temporarily reduce AP"},
     /* 0x75 */ {false, "UNKNOWN_75", nullptr},
     /* 0x76 */ {false, "REFLECT", "Generate reverse attack"},
-    /* 0x77 */ {false, "UNKNOWN_77", nullptr},
+    /* 0x77 */ {false, "DESTROY_ATTACKER_AND_TARGETS", nullptr},
     /* 0x78 */ {false, "ANY", nullptr}, // Treated as "any condition" in find functions
     /* 0x79 */ {false, "UNKNOWN_79", nullptr},
     /* 0x7A */ {false, "UNKNOWN_7A", nullptr},
     /* 0x7B */ {false, "UNKNOWN_7B", nullptr},
     /* 0x7C */ {false, "UNKNOWN_7C", nullptr},
-    /* 0x7D */ {false, "UNKNOWN_7D", nullptr},
-});
+    /* 0x7D */ {false, "ATTACK_AMPLIFY_AND_NULLIFY", "Attacker: 1.5x damage; defender: full immunity"},
+};
 
 void CardDefinition::Stat::decode_code() {
   this->type = static_cast<Type>(this->code / 1000);
@@ -538,10 +538,7 @@ std::vector<CardDefinition::Effect::ExprToken> CardDefinition::Effect::ExprToken
           try {
             const auto& def = def_for_expr_token(token_buf);
             ret.emplace_back(ExprToken{
-                .type = T::REFERENCE,
-                .value = def.value,
-                .text = expr - token_buf.size(),
-                .text_size = token_buf.size()});
+                .type = T::REFERENCE, .value = def.value, .text = expr, .text_size = token_buf.size()});
           } catch (const std::out_of_range&) {
             throw std::runtime_error("unknown token in card effect expression: " + token_buf);
           }
@@ -1725,14 +1722,20 @@ void MapDefinition::assert_semantically_equivalent(const MapDefinition& other) c
   if (this->default_rules != other.default_rules) {
     throw std::runtime_error("default rules not equal");
   }
+  if (this->npc_unknown_a1 != other.npc_unknown_a1) {
+    throw std::runtime_error("npc_unknown_a1 not equal");
+  }
+  if (this->unknown_n1 != other.unknown_n1) {
+    throw std::runtime_error("unknown_n1 not equal");
+  }
   for (size_t z = 0; z < this->npc_decks.size(); z++) {
     if (this->npc_decks[z].card_ids != other.npc_decks[z].card_ids) {
       throw std::runtime_error("npc deck card IDs not equal");
     }
     const auto& this_ai_params = this->npc_ai_params[z];
     const auto& other_ai_params = other.npc_ai_params[z];
-    if (this_ai_params.unknown_a1 != other_ai_params.unknown_a1) {
-      throw std::runtime_error("npc AI params unknown_a1 not equal");
+    if (this_ai_params.params != other_ai_params.params) {
+      throw std::runtime_error("npc AI params not equal");
     }
     if (this_ai_params.is_arkz != other_ai_params.is_arkz) {
       throw std::runtime_error("npc AI params is_arkz not equal");
@@ -1740,12 +1743,6 @@ void MapDefinition::assert_semantically_equivalent(const MapDefinition& other) c
     if (this_ai_params.unknown_a2 != other_ai_params.unknown_a2) {
       throw std::runtime_error("npc AI params unknown_a2 not equal");
     }
-    if (this_ai_params.params != other_ai_params.params) {
-      throw std::runtime_error("npc AI params not equal");
-    }
-  }
-  if (this->unknown_a7 != other.unknown_a7) {
-    throw std::runtime_error("unknown_a7 not equal");
   }
   if (this->npc_ai_params_entry_index != other.npc_ai_params_entry_index) {
     throw std::runtime_error("npc AI params entry indexes not equal");
@@ -1997,28 +1994,21 @@ std::string MapDefinition::str(const CardIndex* card_index, Language language) c
   lines.emplace_back("  quest_name: " + this->quest_name.decode(language));
   lines.emplace_back("  description: " + this->description.decode(language));
   lines.emplace_back(std::format("  map_xy: {} {}", this->map_x, this->map_y));
+  lines.emplace_back("  npc_a1: " + phosg::format_data_string(this->npc_unknown_a1.data(), this->npc_unknown_a1.bytes()));
+  lines.emplace_back("  n1: " + phosg::format_data_string(this->unknown_n1.data(), this->unknown_n1.bytes()));
   for (size_t z = 0; z < 3; z++) {
     lines.emplace_back(std::format("  npc_chars[{}]:", z));
     lines.emplace_back("    name: " + this->npc_ai_params[z].ai_name.decode(language));
-    lines.emplace_back(std::format(
-        "    ai_params: (a1: {:04X} {:04X}, is_arkz: {:02X}, a2: {:02X} {:02X} {:02X})",
-        this->npc_ai_params[z].unknown_a1[0], this->npc_ai_params[z].unknown_a1[1],
-        this->npc_ai_params[z].is_arkz, this->npc_ai_params[z].unknown_a2[0],
-        this->npc_ai_params[z].unknown_a2[1], this->npc_ai_params[z].unknown_a2[2]));
-    for (size_t w = 0; w < 0x78; w += 0x08) {
+    lines.emplace_back(std::format("    ai_params.is_arkz: {}", this->npc_ai_params[z].is_arkz ? "true" : "false"));
+    for (size_t w = 0; w < 0x80; w += 0x08) {
       lines.emplace_back(std::format(
-          "    ai_params.a3[0x{:02X}:0x{:02X}]: {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X}",
+          "    ai_params.params[0x{:02X}:0x{:02X}]: {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X}",
           w, w + 0x08,
           this->npc_ai_params[z].params[w + 0x00], this->npc_ai_params[z].params[w + 0x01],
           this->npc_ai_params[z].params[w + 0x02], this->npc_ai_params[z].params[w + 0x03],
           this->npc_ai_params[z].params[w + 0x04], this->npc_ai_params[z].params[w + 0x05],
           this->npc_ai_params[z].params[w + 0x06], this->npc_ai_params[z].params[w + 0x07]));
     }
-    lines.emplace_back(std::format(
-        "    ai_params.a3[0x78:0x7E]: {:04X} {:04X} {:04X} {:04X} {:04X} {:04X}",
-        this->npc_ai_params[z].params[0x78], this->npc_ai_params[z].params[0x79],
-        this->npc_ai_params[z].params[0x7A], this->npc_ai_params[z].params[0x7B],
-        this->npc_ai_params[z].params[0x7C], this->npc_ai_params[z].params[0x7D]));
     lines.emplace_back(std::format("  npc_decks[{}]:", z));
     lines.emplace_back("    name: " + this->npc_decks[z].deck_name.decode(language));
     for (size_t w = 0; w < 0x20; w++) {
@@ -2051,7 +2041,6 @@ std::string MapDefinition::str(const CardIndex* card_index, Language language) c
       }
     }
   }
-  lines.emplace_back("  a7: " + phosg::format_data_string(this->unknown_a7.data(), this->unknown_a7.bytes()));
   lines.emplace_back(std::format("  npc_ai_params_entry_index: [{:08X}, {:08X}, {:08X}]",
       this->npc_ai_params_entry_index[0], this->npc_ai_params_entry_index[1], this->npc_ai_params_entry_index[2]));
   if (!this->before_message.empty()) {
@@ -2213,6 +2202,7 @@ phosg::JSON MapDefinition::json(Language language) const {
       }
     }
     npc.emplace("DialogueSet", std::move(dialogue_set_json));
+    npcs_json.emplace_back(std::move(npc));
   }
 
   auto unavailable_sc_cards_json = phosg::JSON::list();
@@ -2296,8 +2286,9 @@ MapDefinitionTrial::MapDefinitionTrial(const MapDefinition& map)
       map_x(map.map_x),
       map_y(map.map_y),
       npc_decks(map.npc_decks),
+      npc_unknown_a1(map.npc_unknown_a1),
+      unknown_n1(map.unknown_n1),
       npc_ai_params(map.npc_ai_params),
-      unknown_a7(map.unknown_a7),
       npc_ai_params_entry_index(map.npc_ai_params_entry_index),
       before_message(map.before_message),
       after_message(map.after_message),
@@ -2316,10 +2307,7 @@ MapDefinitionTrial::MapDefinitionTrial(const MapDefinition& map)
     this->dialogue_sets[z] = map.dialogue_sets[z].sub<8>(0);
   }
 
-  // TODO: It'd be nice to rewrite start_tile_definitions, since it seems NTE always expects team A to be represented
-  // by 3 and 4, and team B to be represented by 7 and 8.
-
-  // TODO: NTE also expects team A to always be facing up, and B to always be facing down, so it would be nice to
+  // TODO: NTE expects team A to always be facing up, and B to always be facing down, so it would be nice to
   // automatically rotate the map to make that the case. However, we'd also have to fix up the camera zones and camera
   // specs, and the spec structure is not (yet) fully understood.
 }
@@ -2347,8 +2335,9 @@ MapDefinitionTrial::operator MapDefinition() const {
   ret.map_x = this->map_x;
   ret.map_y = this->map_y;
   ret.npc_decks = this->npc_decks;
+  ret.npc_unknown_a1 = this->npc_unknown_a1;
+  ret.unknown_n1 = this->unknown_n1;
   ret.npc_ai_params = this->npc_ai_params;
-  ret.unknown_a7 = this->unknown_a7;
   ret.npc_ai_params_entry_index = this->npc_ai_params_entry_index;
   ret.before_message = this->before_message;
   ret.after_message = this->after_message;
@@ -2413,6 +2402,73 @@ MapDefinitionTrial::operator MapDefinition() const {
       throw std::logic_error("too many NPC decks in trial map definition");
   }
   return ret;
+}
+
+void MapDefinition::rewrite_map_tiles_for_preview(
+    parray<parray<uint8_t, 0x10>, 0x10>& dest_map_tiles,
+    const parray<parray<uint8_t, 0x10>, 0x10>& src_map_tiles,
+    const parray<parray<uint8_t, 6>, 2>& start_tile_definitions,
+    bool is_nte) {
+  std::array<uint8_t, 0x40> rewrites;
+  for (uint8_t z = 0; z < 0x40; z++) {
+    rewrites[z] = z;
+  }
+
+  auto add_swap = [&](uint8_t a, uint8_t b) -> void {
+    if ((rewrites[a] != a) || (rewrites[b] != b)) {
+      throw std::runtime_error("Start tile indexes would overwrite each other");
+    }
+    rewrites[a] = b;
+    rewrites[b] = a;
+  };
+  auto add_cycle = [&](uint8_t a, uint8_t b, uint8_t c) -> void {
+    if ((rewrites[a] != a) || (rewrites[b] != b) || (rewrites[c] != c)) {
+      throw std::runtime_error("Start tile indexes would overwrite each other");
+    }
+    rewrites[a] = b;
+    rewrites[b] = c;
+    rewrites[c] = a;
+  };
+
+  auto check_side = [&add_swap, &add_cycle](const parray<uint8_t, 6>& starts, uint8_t p1, uint8_t p2) -> void {
+    if ((starts[1] == 0xFF) || (starts[2] == 0xFF)) { // This team only has 1 start location
+      uint8_t start0 = starts[0] & 0x3F;
+      if ((start0 != p1) && (start0 != p2)) {
+        add_swap(start0 & 0x3F, p1);
+      }
+    } else {
+      uint8_t start1 = starts[1] & 0x3F;
+      uint8_t start2 = starts[2] & 0x3F;
+      if ((start1 != p1) && (start1 != p2)) {
+        if (start2 == p1) {
+          add_cycle(start1, p1, p2);
+        } else if ((start2 == p2) || (start2 == start1)) {
+          add_swap(start1, p1);
+        } else {
+          add_swap(start1, p1);
+          add_swap(start2, p2);
+        }
+      } else if ((start2 != p1) && (start2 != p2)) {
+        if (start1 == p1) {
+          add_swap(start2, p2);
+        } else {
+          add_swap(start2, p1);
+        }
+      }
+    }
+  };
+
+  check_side(start_tile_definitions[0], 0x03, 0x04);
+  check_side(start_tile_definitions[1], 0x06 + is_nte, 0x07 + is_nte);
+
+  // The rewrites have all been collected; now just rewrite start_tile_definitions and map_tiles
+  for (uint8_t y = 0; y < src_map_tiles.size(); y++) {
+    auto& src_row = src_map_tiles[y];
+    auto& dest_row = dest_map_tiles[y];
+    for (uint8_t x = 0; x < src_row.size(); x++) {
+      dest_row[x] = rewrites[src_row[x]];
+    }
+  }
 }
 
 bool Rules::check_invalid_fields() const {
@@ -2523,6 +2579,8 @@ phosg::JSON COMDeckDefinition::json() const {
       {"PlayerName", this->player_name},
       {"DeckName", this->deck_name},
       {"CardIDs", std::move(card_ids_list)},
+      {"AIParamsIndex", this->ai_params_index},
+      {"PlayerLevel", this->player_level},
   });
 }
 
@@ -2548,23 +2606,23 @@ CardIndex::CardIndex(
       phosg::StringReader r(text_bin_data);
 
       while (!r.eof()) {
-        std::string card_id_str = r.get_cstr();
+        std::string card_id_str{r.get_cstr()};
         if (card_id_str.empty() || (static_cast<uint8_t>(card_id_str[0]) == 0xFF)) {
           break;
         }
         phosg::strip_leading_whitespace(card_id_str);
-        uint32_t card_id = stoul(card_id_str);
+        uint32_t card_id = std::stoul(card_id_str);
 
         // Read all pages for this card
         std::string text;
         std::string first_page;
         std::vector<std::string> pages;
         for (;;) {
-          std::string line = r.get_cstr();
-          if (line.empty()) {
+          std::string_view orig_line = r.get_cstr();
+          if (orig_line.empty()) {
             break;
           }
-          line = text_is_sjis ? tt_sega_sjis_to_utf8(line) : tt_8859_to_utf8(line);
+          std::string line = text_is_sjis ? tt_sega_sjis_to_utf8(orig_line) : tt_8859_to_utf8(orig_line);
           if (first_page.empty()) {
             first_page = line;
           }
@@ -2652,8 +2710,8 @@ CardIndex::CardIndex(
 
       while (!r.eof()) {
         uint32_t card_id = r.get_u32l();
-        std::string dice_caption = r.read(0xFE);
-        std::string dice_text = r.read(0xFE);
+        std::string dice_caption{r.read(0xFE)};
+        std::string dice_text{r.read(0xFE)};
         phosg::strip_trailing_zeroes(dice_caption);
         phosg::strip_trailing_zeroes(dice_text);
         card_dice_text.emplace(card_id, make_pair(std::move(dice_caption), std::move(dice_text)));
@@ -2703,8 +2761,8 @@ CardIndex::CardIndex(
         throw std::runtime_error(std::format("duplicate card id: {:08X}", entry->def.card_id));
       }
 
-      // Some cards intentionally have the same name, so we just leave them unindexed (they can still be looked up by
-      // ID, of course)
+      // Some cards intentionally have the same name, so we just leave the extras unindexed (they can still be looked
+      // up by ID, of course)
       std::string name = entry->def.en_name.decode(Language::ENGLISH);
       this->card_definitions_by_name.emplace(name, entry);
       this->card_definitions_by_name_normalized.emplace(this->normalize_card_name(name), entry);
@@ -2827,16 +2885,16 @@ std::string CardIndex::normalize_card_name(const std::string& name) {
 }
 
 MapIndex::VersionedMap::VersionedMap(std::shared_ptr<const MapDefinition> map, Language language)
-    : map(map),
-      language(language) {}
+    : map(map), language(language) {}
 
-MapIndex::VersionedMap::VersionedMap(std::string&& compressed_data, Language language)
-    : language(language), compressed_data(std::make_shared<std::string>(std::move(compressed_data))) {
-  std::string decompressed = prs_decompress(*this->compressed_data);
+MapIndex::VersionedMap::VersionedMap(std::string&& compressed_data, Language language) : language(language) {
+  std::string decompressed = prs_decompress(compressed_data);
   if (decompressed.size() == sizeof(MapDefinitionTrial)) {
     this->map = std::make_shared<MapDefinition>(*reinterpret_cast<const MapDefinitionTrial*>(decompressed.data()));
+    // Don't set compressed_data here, since it contains NTE-format data - it will be lazily computed when needed
   } else if (decompressed.size() == sizeof(MapDefinition)) {
     this->map = std::make_shared<MapDefinition>(*reinterpret_cast<const MapDefinition*>(decompressed.data()));
+    this->compressed_data = std::make_shared<std::string>(std::move(compressed_data));
   } else {
     throw std::runtime_error(std::format(
         "decompressed data size is incorrect (expected {} bytes, read {} bytes)",
@@ -2934,8 +2992,8 @@ MapIndex::MapIndex(const std::string& directory, bool raise_on_any_failure) {
 
   auto try_add_map_file = [&](std::shared_ptr<Category> category, const std::string& file_path) -> void {
     try {
-      std::string filename = phosg::basename(file_path);
-      std::string base_filename;
+      std::string_view filename = phosg::basename(file_path);
+      std::string_view base_filename;
       std::string compressed_data;
       std::shared_ptr<MapDefinition> decompressed_data;
       if (filename.ends_with(".mnmd") || filename.ends_with(".bind")) {
@@ -3115,7 +3173,8 @@ const std::string& MapIndex::get_compressed_list(size_t num_players, Language la
       e.map_number = vm->map->map_number;
       e.width = vm->map->width;
       e.height = vm->map->height;
-      e.map_tiles = vm->map->map_tiles;
+      MapDefinition::rewrite_map_tiles_for_preview(
+          e.map_tiles, vm->map->map_tiles, vm->map->start_tile_definitions, is_trial);
       e.modification_tiles = vm->map->overlay_state.tiles;
 
       e.name_offset = strings_w.size();
@@ -3171,7 +3230,9 @@ COMDeckIndex::COMDeckIndex(const std::string& filename) {
       def->index = this->decks.size() - 1;
       def->player_name = def_json->at(0).as_string();
       def->deck_name = def_json->at(1).as_string();
-      auto card_ids_json = def_json->at(2);
+      def->ai_params_index = def_json->at(2).as_int();
+      def->player_level = def_json->at(3).as_int();
+      auto card_ids_json = def_json->at(4);
       for (size_t z = 0; z < 0x1F; z++) {
         def->card_ids[z] = card_ids_json.at(z).as_int();
       }
@@ -3400,12 +3461,12 @@ const char* phosg::name_for_enum<Episode3::CriterionCode>(Episode3::CriterionCod
       return "RA_CLASS_SC";
     case Episode3::CriterionCode::FO_CLASS_SC:
       return "FO_CLASS_SC";
-    case Episode3::CriterionCode::SAME_TEAM:
-      return "SAME_TEAM";
-    case Episode3::CriterionCode::SAME_PLAYER:
-      return "SAME_PLAYER";
-    case Episode3::CriterionCode::SAME_TEAM_NOT_SAME_PLAYER:
-      return "SAME_TEAM_NOT_SAME_PLAYER";
+    case Episode3::CriterionCode::SELF_OR_ALLY:
+      return "SELF_OR_ALLY";
+    case Episode3::CriterionCode::NOT_SELF:
+      return "NOT_SELF";
+    case Episode3::CriterionCode::ALLY_ONLY:
+      return "ALLY_ONLY";
     case Episode3::CriterionCode::FC:
       return "FC";
     case Episode3::CriterionCode::NOT_SC:
@@ -3622,13 +3683,13 @@ template <>
 const char* phosg::name_for_enum<Episode3::Direction>(Episode3::Direction d) {
   switch (d) {
     case Episode3::Direction::RIGHT:
-      return "LEFT";
-    case Episode3::Direction::UP:
-      return "DOWN";
-    case Episode3::Direction::LEFT:
       return "RIGHT";
-    case Episode3::Direction::DOWN:
+    case Episode3::Direction::UP:
       return "UP";
+    case Episode3::Direction::LEFT:
+      return "LEFT";
+    case Episode3::Direction::DOWN:
+      return "DOWN";
     case Episode3::Direction::INVALID_FF:
       return "INVALID_FF";
     default:

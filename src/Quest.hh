@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "CommonItemSet.hh"
-#include "IntegralExpression.hh"
 #include "ItemParameterTable.hh"
 #include "Map.hh"
 #include "PlayerSubordinates.hh"
@@ -126,6 +125,7 @@ struct QuestIndex {
   };
   using IncludeCondition = std::function<IncludeState(std::shared_ptr<const Quest>)>;
 
+  std::shared_ptr<const QuestOpcodeIndex> opcode_index;
   std::string directory;
   std::shared_ptr<const QuestCategoryIndex> category_index;
 
@@ -133,7 +133,11 @@ struct QuestIndex {
   std::map<std::string, std::shared_ptr<Quest>> quests_by_name;
   std::map<uint32_t, std::map<uint32_t, std::shared_ptr<Quest>>> quests_by_category_id_and_number;
 
-  QuestIndex(const std::string& directory, std::shared_ptr<const QuestCategoryIndex> category_index, bool raise_on_any_failure);
+  QuestIndex(
+      std::shared_ptr<const QuestOpcodeIndex> opcode_index,
+      const std::string& directory,
+      std::shared_ptr<const QuestCategoryIndex> category_index,
+      bool raise_on_any_failure);
   phosg::JSON json() const;
 
   std::shared_ptr<const Quest> get(uint32_t quest_number) const;
@@ -153,7 +157,7 @@ struct QuestIndex {
 };
 
 std::string encode_download_quest_data(
-    const std::string& compressed_data, size_t decompressed_size = 0, uint32_t encryption_seed = 0);
+    const std::string& compressed_data, size_t decompressed_size = 0, int64_t encryption_seed = -1);
 
 std::string decode_gci_data(
     const std::string& data, ssize_t find_seed_num_threads = -1, int64_t known_seed = -1, bool skip_checksum = false);

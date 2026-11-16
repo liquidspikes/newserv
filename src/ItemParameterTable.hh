@@ -130,8 +130,38 @@ public:
   };
 
   struct Unit : ItemBase {
+    // Values for stat:
+    //   0000 = ATP (amount = bonus value)
+    //   0001 = MST (amount = bonus value)
+    //   0002 = ATA (amount = bonus value * 10, so amount = 30 means 3 ATA, for example)
+    //   0003 = EVP (amount = bonus value)
+    //   0004 = HP (amount = bonus value)
+    //   0005 = TP (amount = bonus value)
+    //   0006 = DFP (amount = bonus value)
+    //   0007 = LCK (amount = bonus value)
+    //   0008 = ATP, MST, ATA, EVP, DFP, and LCK (amount = bonus value, except ATA for which amount = bonus value * 10)
+    //   0009 = EFR (amount = bonus value)
+    //   000A = EIC (amount = bonus value)
+    //   000B = ETH (amount = bonus value)
+    //   000C = ELT (amount = bonus value)
+    //   000D = EDK (amount = bonus value)
+    //   000E = EFR, EIC, ETH, ELT, and EDK (amount = bonus value)
+    //   000F = HP generation (amount = seconds between HP increments)
+    //   0010 = TP generation (amount = seconds between TP increments)
+    //   0011 = PB generation (amount = seconds between PB increments)
+    //   0012 = Level of all learned techniques (amount = number of levels)
+    //   0013 = Attack speed (amount = percentage increase)
+    //   0014 = immunity to all negative status effects (amount is ignored)
+    //   0015 = trap vision (amount is ignored)
+    //   0016 = immunity to poison (amount is ignored)
+    //   0017 = immunity to paralysis (amount is ignored)
+    //   0018 = immunity to shock (amount is ignored)
+    //   0019 = immunity to slow (amount is ignored)
+    //   001A = immunity to confusion (amount is ignored)
+    //   001B = immunity to freeze (amount is ignored)
+    //   0027 = unknown (possibly unused / does nothing, but appears in Sega's ItemPMT file. TODO: investigate)
     uint16_t stat = 0;
-    uint16_t stat_amount = 0;
+    uint16_t amount = 0;
     int16_t modifier_amount = 0;
 
     static Unit from_json(const phosg::JSON& json);
@@ -190,13 +220,20 @@ public:
   };
 
   struct Tool : ItemBase {
+    // The use of this field varies by item type:
+    // - For mates, this value is scaled by difficulty level: 1.0 in Normal, 1.5 in Hard, 2.0 in Very Hard, and 2.5 in
+    //   Ultimate. Trimate ignores this value and always restores full HP.
+    // - For fluids, this value is used directly in Normal; in Hard, 25 or 50 is added (for Monofluid and Difluid
+    //   respectively); in Very Hard, 50 or 100 is added; in Ultimate, 75 or 150 is added. Trifluid ignores this value
+    //   and always restores full TP.
+    // - For grinders, this is the amount to increment the equipped weapon's grind when used.
     uint16_t amount = 0;
-    uint16_t tech = 0;
-    int32_t cost = 0;
-    // Bits in item_flags:
+    uint16_t tech = 0; // Only used for technique disks
+    int32_t cost = 0; // If stackable, cost for 1x of the item
+    // item_flags is only used on v2 and later; it's ignored on v1. Bits:
     //   00000001 - ever usable by player ("Use" appears in inventory menu)
     //   00000002 - unknown
-    //   00000004 - unknown
+    //   00000004 - can be fed to mags
     //   00000008 - usable by android characters
     //   00000010 - usable in Pioneer 2 / Lab
     //   00000020 - usable in boss arenas
@@ -321,16 +358,16 @@ public:
 
   struct ShieldEffect {
     uint32_t sound_id = 0;
-    uint32_t unknown_a1 = 0;
+    uint32_t sound_pitch = 0;
 
     static ShieldEffect from_json(const phosg::JSON& json);
     phosg::JSON json() const;
   };
 
   struct PhotonColorEntry {
-    uint32_t unknown_a1 = 0;
-    VectorXYZTF unknown_a2;
-    VectorXYZTF unknown_a3;
+    uint32_t blendable = 0;
+    VectorXYZTF light_color; // ARGB
+    VectorXYZTF dark_color; // ARGB
 
     static PhotonColorEntry from_json(const phosg::JSON& json);
     phosg::JSON json() const;
@@ -349,18 +386,21 @@ public:
     uint32_t eff_value1 = 0;
     uint32_t sound_id2 = 0;
     uint32_t eff_value2 = 0;
-    parray<uint8_t, 0x10> unknown_a5;
+    uint32_t sound_id3 = 0;
+    uint32_t eff_value3 = 0;
+    uint32_t sound_id4 = 0;
+    uint32_t eff_value4 = 0;
 
     static WeaponEffect from_json(const phosg::JSON& json);
     phosg::JSON json() const;
   };
 
   struct WeaponRange {
-    float unknown_a1 = 0;
-    float unknown_a2 = 0;
-    uint32_t unknown_a3 = 0; // Angle
-    uint32_t unknown_a4 = 0; // Angle
-    uint32_t unknown_a5 = 0;
+    float horizontal = 0;
+    float vertical = 0;
+    uint32_t horizontal_half_angle = 0;
+    uint32_t vertical_half_angle = 0;
+    uint32_t max_targets = 0;
 
     static WeaponRange from_json(const phosg::JSON& json);
     phosg::JSON json() const;
@@ -368,7 +408,7 @@ public:
 
   struct RangedSpecial {
     uint8_t data1_1 = 0;
-    uint8_t data1_2 = 0;
+    uint8_t data1_2 = 0; // May be FF if it applies to all weapons matching data1_1
     uint8_t weapon_range_index = 0;
     uint8_t unknown_a1 = 0;
 
@@ -446,7 +486,7 @@ public:
   std::string get_star_value_table() const;
 
   // unknown_a1 accessors
-  virtual std::string get_unknown_a1() const = 0;
+  virtual std::string_view get_unknown_a1() const = 0;
 
   // special_table accessors
   virtual size_t num_specials() const = 0;

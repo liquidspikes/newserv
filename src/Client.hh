@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <resource_file/Emulators/Expression.hh>
 #include <stdexcept>
 
 #include "Account.hh"
@@ -134,6 +135,8 @@ public:
 
   // Patch server state (only used for PC_PATCH and BB_PATCH versions)
   std::vector<PatchFileChecksumRequest> patch_file_checksum_requests;
+  bool patch_checksum_responses_received = false;
+  bool patch_checksum_requests_sent = false;
 
   // Network
   std::shared_ptr<Channel> channel;
@@ -165,6 +168,7 @@ public:
   uint16_t card_battle_table_seat_state = 0;
   std::weak_ptr<Episode3::Tournament::Team> ep3_tournament_team;
   std::shared_ptr<const Episode3::BattleRecord> ep3_prev_battle_record;
+  std::string ep3_game_metadata_text;
   std::shared_ptr<const Menu> last_menu_sent;
   uint32_t last_game_info_requested = 0;
   struct JoinCommand {
@@ -259,7 +263,7 @@ public:
   std::shared_ptr<const TeamIndex::Team> team() const;
 
   bool evaluate_quest_availability_expression(
-      std::shared_ptr<const IntegralExpression> expr,
+      std::shared_ptr<const ResourceDASM::Expression::Node> expr,
       std::shared_ptr<const Lobby> game,
       uint8_t event,
       Difficulty difficulty,

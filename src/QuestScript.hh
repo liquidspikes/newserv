@@ -10,6 +10,138 @@
 #include "Text.hh"
 #include "Version.hh"
 
+struct QuestOpcodeIndex {
+  struct OpcodeDefinition {
+    struct Argument {
+      enum class Type {
+        // These are the argument data types. All values are stored little-endian in the script data, even on GC.
+        LABEL16 = 0, // 16-bit index into the function table
+        LABEL16_SET, // Byte specifying how many labels, followed by that many 16-bit indexes into the function table
+        LABEL32, // 32-bit index into the function table
+        R_REG, // Byte specifying a register number (rXX or fXX) which is read by the opcode and not modified
+        W_REG, // Same as above, but register is modified by the opcode and not read
+        RW_REG, // Same as above, but register is both read by the opcode and then modified
+        R_REG_SET, // Byte specifying how many registers, followed by that many bytes specifying register numbers
+        R_REG32, // Same as R_REG, but register number specified as 32-bit value
+        W_REG32, // Same as W_REG, but register number specified as 32-bit value
+        RW_REG32, // Same as RW_REG, but register number specified as 32-bit value
+        // REG_SET_FIXED is a fixed-size set of registers with heterogenous meanings; the meanings, types, names, etc.
+        // are specified in sub_args
+        REG_SET_FIXED, // Sequence of consecutive regs (meanings defined in sub_args) specified by the first reg number
+        REG32_SET_FIXED, // Same as above, but register number specified as 32-bit value
+        // REG_TUPLE_FIXED is a fixed-size set of registers with homogenous meanings (e.g. bytes in item.data1); the
+        // meaning of each is specified by this Argument struct (e.g. data_type applies to all of them) and they do not
+        // have individual names. The count is specified by reg_count
+        R_REG_TUPLE_FIXED, // Sequence of consecutive regs specified by the first reg number
+        R_REG32_TUPLE_FIXED, // Same as above, but register number specified as 32-bit value
+        W_REG_TUPLE_FIXED, // Sequence of consecutive regs specified by the first reg number
+        W_REG32_TUPLE_FIXED, // Same as above, but register number specified as 32-bit value
+        I8, // 1-byte unsigned immediate integer
+        I16, // 2-byte unsigned immediate integer
+        I32, // 4-byte unsigned immediate integer
+        FLOAT32, // 4-byte immediate floating-point value
+        CSTRING, // Sequence of nonzero bytes ending with a zero byte
+      };
+
+      enum class DataType {
+        // This specifies how the data following a label should be interpreted by the disassembler
+        NONE = 0, // Unknown data type
+        FLOAT, // Only valid for REG/REG32 argument types; means the value is encoded as a float instead of an int
+        SCRIPT, // Quest script opcodes
+        DATA, // Raw data
+        CSTRING, // Text
+        PLAYER_STATS, // PlayerStats structure
+        PLAYER_VISUAL_CONFIG, // PlayerVisualConfig structure
+        RESIST_DATA, // ResistData structure
+        ATTACK_DATA, // AttackData structure
+        MOVEMENT_DATA, // MovementData structure
+        IMAGE_DATA, // Compressed image data
+        VECTOR4F_LIST, // List of VectorXYZTF structures
+      };
+
+      static constexpr int64_t NO_DEFAULT_VALUE = -0x8000000000000000LL;
+      Type type;
+      DataType data_type;
+      std::vector<Argument> sub_args; // Only used for REG_SET_FIXED types
+      size_t reg_count = 0; // Only used for REG_TUPLE_FIXED types
+      std::string name;
+      std::string write_name; // Only used for RW_ types
+      int64_t default_value = NO_DEFAULT_VALUE;
+
+      Argument(Type type, const char* name, int64_t default_value = NO_DEFAULT_VALUE);
+      Argument(Type type, const char* name, const char* write_name);
+      Argument(Type type, DataType data_type, const char* name, int64_t default_value = NO_DEFAULT_VALUE);
+      Argument(Type type, std::vector<Argument> sub_args);
+      Argument(Type type, std::initializer_list<Argument> sub_args);
+      Argument(Type type, std::vector<const char*> ro_names);
+      Argument(Type type, std::initializer_list<const char*> ro_names);
+      explicit Argument(const phosg::JSON& json);
+      phosg::JSON json() const;
+
+      inline bool is_output_arg() const {
+        if ((this->type == Type::W_REG) ||
+            (this->type == Type::RW_REG) ||
+            (this->type == Type::W_REG32) ||
+            (this->type == Type::RW_REG32) ||
+            (this->type == Type::W_REG_TUPLE_FIXED) ||
+            (this->type == Type::W_REG32_TUPLE_FIXED)) {
+          return true;
+        }
+        for (const auto& sub_arg : this->sub_args) {
+          if (sub_arg.is_output_arg()) {
+            return true;
+          }
+        }
+        return false;
+      }
+      inline bool is_reg32_type() const {
+        return (this->type == Type::R_REG32) ||
+            (this->type == Type::W_REG32) ||
+            (this->type == Type::RW_REG32) ||
+            (this->type == Type::REG32_SET_FIXED) ||
+            (this->type == Type::R_REG32_TUPLE_FIXED) ||
+            (this->type == Type::W_REG32_TUPLE_FIXED);
+      }
+      inline bool is_reg_tuple_type() const {
+        return (this->type == Type::R_REG_TUPLE_FIXED) ||
+            (this->type == Type::R_REG32_TUPLE_FIXED) ||
+            (this->type == Type::W_REG_TUPLE_FIXED) ||
+            (this->type == Type::W_REG32_TUPLE_FIXED);
+      }
+      inline size_t effective_reg_count() const {
+        return ((this->type == Type::REG_SET_FIXED) || (this->type == Type::REG32_SET_FIXED))
+            ? this->sub_args.size()
+            : this->reg_count;
+      }
+    };
+
+    uint16_t opcode;
+    // By convention, the first of these names is the canonical name (used when disassembling) and the last is the
+    // Qedit name. When assembling, all names in this list are considered valid.
+    std::vector<std::string> names;
+    std::vector<Argument> args;
+    uint32_t flags;
+
+    OpcodeDefinition() = default;
+    explicit OpcodeDefinition(const phosg::JSON& json);
+    phosg::JSON json() const;
+    std::string str() const;
+  };
+
+  static std::vector<OpcodeDefinition> create_default_opcode_defs();
+
+  std::vector<OpcodeDefinition> default_opcodes;
+  std::vector<OpcodeDefinition> custom_opcodes;
+  std::array<std::unordered_map<uint16_t, const OpcodeDefinition*>, NUM_VERSIONS> by_opcode;
+  std::array<std::unordered_map<std::string, const OpcodeDefinition*>, NUM_VERSIONS> by_name;
+
+  explicit QuestOpcodeIndex(std::vector<OpcodeDefinition>&& custom_opcodes = {});
+  explicit QuestOpcodeIndex(const phosg::JSON& custom_opcodes_json);
+  void add_opcodes(const OpcodeDefinition* opcodes, size_t count, bool overwrite);
+  const std::unordered_map<uint16_t, const OpcodeDefinition*>& by_opcode_for_version(Version v) const;
+  const std::unordered_map<std::string, const OpcodeDefinition*>& by_name_for_version(Version v) const;
+};
+
 struct PSOQuestHeaderDCNTE {
   /* 0000 */ le_uint32_t text_offset = 0;
   /* 0004 */ le_uint32_t label_table_offset = 0;
@@ -132,11 +264,12 @@ struct PSOQuestHeaderBB : PSOQuestHeaderBBBase {
   /* 122C */
 } __packed_ws__(PSOQuestHeaderBB, 0x122C);
 
-void check_quest_opcode_definitions();
+void check_default_quest_opcode_definitions();
 
 Episode episode_for_quest_episode_number(uint8_t episode_number);
 
 std::string disassemble_quest_script(
+    const QuestOpcodeIndex& opcode_index,
     const void* bin_data, // Must not be null
     size_t bin_size,
     Version version,
@@ -150,9 +283,30 @@ struct AssembledQuestScript {
   QuestMetadata meta;
 };
 AssembledQuestScript assemble_quest_script(
-    const std::string& text,
+    const QuestOpcodeIndex& opcode_index,
+    std::string_view text,
     const std::vector<std::string>& script_include_directories,
     const std::vector<std::string>& native_include_directories,
     bool strict = true);
 
-void populate_quest_metadata_from_script(QuestMetadata& meta, const void* data, size_t size, Version version, Language language);
+void populate_quest_metadata_from_script(
+    const QuestOpcodeIndex& opcode_index,
+    QuestMetadata& meta,
+    const void* data,
+    size_t size,
+    Version version,
+    Language language);
+
+template <>
+const char* phosg::name_for_enum<QuestOpcodeIndex::OpcodeDefinition::Argument::Type>(
+    QuestOpcodeIndex::OpcodeDefinition::Argument::Type v);
+template <>
+QuestOpcodeIndex::OpcodeDefinition::Argument::Type
+phosg::enum_for_name<QuestOpcodeIndex::OpcodeDefinition::Argument::Type>(const char* name);
+
+template <>
+const char* phosg::name_for_enum<QuestOpcodeIndex::OpcodeDefinition::Argument::DataType>(
+    QuestOpcodeIndex::OpcodeDefinition::Argument::DataType v);
+template <>
+QuestOpcodeIndex::OpcodeDefinition::Argument::DataType
+phosg::enum_for_name<QuestOpcodeIndex::OpcodeDefinition::Argument::DataType>(const char* name);

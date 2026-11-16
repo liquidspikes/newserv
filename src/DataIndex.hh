@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <phosg/JSON.hh>
+#include <resource_file/Emulators/Expression.hh>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -149,9 +150,9 @@ struct DataIndex {
   ServerDropMode default_drop_mode_v4_normal = ServerDropMode::SERVER_SHARED;
   ServerDropMode default_drop_mode_v4_battle = ServerDropMode::SERVER_SHARED;
   ServerDropMode default_drop_mode_v4_challenge = ServerDropMode::SERVER_SHARED;
-  std::unordered_map<uint16_t, IntegralExpression> quest_flag_rewrites_v1_v2;
-  std::unordered_map<uint16_t, IntegralExpression> quest_flag_rewrites_v3;
-  std::unordered_map<uint16_t, IntegralExpression> quest_flag_rewrites_v4;
+  std::unordered_map<uint16_t, std::unique_ptr<ResourceDASM::Expression::Node>> quest_flag_rewrites_v1_v2;
+  std::unordered_map<uint16_t, std::unique_ptr<ResourceDASM::Expression::Node>> quest_flag_rewrites_v3;
+  std::unordered_map<uint16_t, std::unique_ptr<ResourceDASM::Expression::Node>> quest_flag_rewrites_v4;
   std::unordered_map<std::string, std::pair<uint8_t, uint32_t>> quest_counter_fields; // For $qfread command
   uint64_t persistent_game_idle_timeout_usecs = 0;
   std::unordered_map<uint32_t, int64_t> enable_send_function_call_quest_numbers;
@@ -167,6 +168,7 @@ struct DataIndex {
   RunShellBehavior run_shell_behavior = RunShellBehavior::DEFAULT;
   BehaviorSwitch cheat_mode_behavior = BehaviorSwitch::OFF_BY_DEFAULT;
   bool default_switch_assist_enabled = false;
+  bool bb_extended_tool_shop_enabled = false;
   bool use_game_creator_section_id = false;
   bool rare_notifs_enabled_for_client_drops = false;
   bool default_rare_notifs_enabled_v1_v2 = false;
@@ -199,6 +201,7 @@ struct DataIndex {
   std::shared_ptr<const G_SetEXResultValues_Ep3_6xB4x4B> ep3_tournament_ex_values;
   std::shared_ptr<const G_SetEXResultValues_Ep3_6xB4x4B> ep3_tournament_final_round_ex_values;
   std::shared_ptr<const QuestCategoryIndex> quest_category_index;
+  std::shared_ptr<const QuestOpcodeIndex> quest_opcodes;
   std::shared_ptr<const QuestIndex> quest_index;
   std::shared_ptr<const LevelTable> level_table_v1_v2;
   std::shared_ptr<const LevelTable> level_table_v3;
@@ -383,6 +386,7 @@ struct DataIndex {
       Episode episode, GameMode mode, Difficulty difficulty, const Variations& variations);
 
   void collect_network_addresses();
+  void load_config_before();
   void load_config_early();
   void load_config_late();
   void load_bb_private_keys();
@@ -403,10 +407,11 @@ struct DataIndex {
   void load_word_select_table();
   void load_ep3_cards();
   void load_ep3_maps(bool raise_on_any_failure = false);
+  void load_quest_opcode_defs();
   void load_quest_index(bool raise_on_any_failure = false);
   void compile_functions(bool raise_on_any_failure = false);
   void load_dol_files();
   void generate_bb_stream_file();
 
-  void load_all();
+  void load_all(size_t max_threads);
 };

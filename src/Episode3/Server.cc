@@ -36,6 +36,8 @@ Server::Server(std::shared_ptr<Lobby> lobby, Options&& options)
       def_dice_value_range_override(0xFF),
       atk_dice_value_range_2v1_override(0xFF),
       def_dice_value_range_2v1_override(0xFF),
+      lone_player(0xFF),
+      counter_slot_to_client_id(0xFF),
       battle_finished(false),
       battle_in_progress(false),
       round_num(1),
@@ -49,14 +51,14 @@ Server::Server(std::shared_ptr<Lobby> lobby, Options&& options)
       num_pending_attacks(0),
       client_done_enqueuing_attacks(false),
       player_ready_to_end_phase(false),
-      unknown_a10(0),
+      attack_resolution_pending(false),
       overall_time_expired(false),
       battle_start_usecs(0),
       should_copy_prev_states_to_current_states(0),
       card_special(nullptr),
       clients_done_in_redraw_initial_hand_phase(false),
       num_pending_attacks_with_cards(0),
-      unknown_a14(0),
+      current_attack_index(0),
       unknown_a15(0),
       defense_list_ended_for_client(false),
       next_assist_card_set_number(1),
@@ -368,7 +370,7 @@ void Server::add_team_exp(uint8_t team_id, int32_t exp) {
       this->team_exp[team_id] + exp, 0, this->team_client_count[team_id] * 96);
 
   uint8_t dice_boost = this->team_exp[team_id] / (this->team_client_count[team_id] * 12);
-  this->card_special->adjust_dice_boost_if_team_has_condition_52(team_id, &dice_boost, 0);
+  this->card_special->adjust_dice_boost_for_condition_multiplier(team_id, &dice_boost, nullptr);
   this->team_dice_bonus[team_id] = std::min<uint8_t>(dice_boost, 8);
 }
 
@@ -856,7 +858,7 @@ void Server::dice_phase_before() {
   this->current_team_turn2 = this->current_team_turn1;
   this->num_pending_attacks = 0;
   this->num_pending_attacks_with_cards = 0;
-  this->unknown_a14 = 0;
+  this->current_attack_index = 0;
   this->update_battle_state_flags_and_send_6xB4x03_if_needed();
 }
 
@@ -913,12 +915,12 @@ void Server::end_action_phase() {
   // we may have to delete the enum if that turns out to be false.
   this->action_subphase = static_cast<ActionSubphase>(static_cast<uint8_t>(this->action_subphase) + 2);
   if (this->options.is_nte()) {
-    this->unknown_8023EEF4();
+    this->prepare_next_valid_attack();
     this->update_battle_state_flags_and_send_6xB4x03_if_needed(0);
     this->send_6xB4x02_for_all_players_if_needed();
   } else {
     this->copy_player_states_to_prev_states();
-    this->unknown_8023EEF4();
+    this->prepare_next_valid_attack();
     this->send_set_card_updates_and_6xB4x04_if_needed();
   }
 }
@@ -1129,7 +1131,7 @@ void Server::move_phase_after() {
             auto sc_card = ps->get_sc_card();
             if (sc_card && (abs(sc_card->loc.x - trap_x) < 2) && (abs(sc_card->loc.y - trap_y) < 2) &&
                 ps->replace_assist_card_by_id(trap_card_id)) {
-              G_EnqueueAnimation_Ep3_6xB4x2C cmd;
+              G_SetAnimationMetadata_Ep3_6xB4x2C cmd;
               cmd.change_type = 0x01;
               cmd.client_id = client_id;
               cmd.card_refs.clear(0xFFFF);
@@ -1137,7 +1139,7 @@ void Server::move_phase_after() {
               cmd.loc.y = trap_y;
               cmd.loc.direction = static_cast<Direction>(trap_type);
               cmd.trap_card_id = trap_card_id;
-              cmd.unknown_a3 = 0xFFFFFFFF;
+              cmd.unused = 0xFFFFFFFF;
               this->send(cmd);
             }
           }
@@ -1173,7 +1175,7 @@ void Server::move_phase_after() {
 }
 
 void Server::action_phase_before() {
-  this->unknown_a10 = 0;
+  this->attack_resolution_pending = false;
   this->current_team_turn2 = this->current_team_turn1;
   for (size_t client_id = 0; client_id < 4; client_id++) {
     auto ps = this->player_states[client_id];
@@ -1658,10 +1660,23 @@ void Server::setup_and_start_battle() {
 
   this->send_6xB4x46();
 
-  // Re-send game metadata to spectator teams, since loading the battle scene seems to delete it
+  // Send B1 (server time) to all relevant clients. The preceding 6xB4x05 causes the loading sequence to start; the B1
+  // command will cause the client to send 99, after which we can send 6xB4x52 (update game metadata) which will run
+  // after the necessary HUD objects are constructed.
   auto l = this->lobby.lock();
   if (l) {
-    send_ep3_update_game_metadata(l);
+    for (auto c : l->clients) {
+      if (c) {
+        send_server_time(c);
+      }
+    }
+    for (auto watcher_l : l->watcher_lobbies) {
+      for (auto c : watcher_l->clients) {
+        if (c) {
+          send_server_time(c);
+        }
+      }
+    }
   }
 }
 
@@ -1767,7 +1782,7 @@ const std::unordered_map<uint8_t, Server::handler_t> Server::subcommand_handlers
 void Server::on_server_data_input(std::shared_ptr<Client> sender_c, const std::string& data) {
   auto header = check_size_t<G_CardBattleCommandHeader>(data, 0xFFFF);
   size_t expected_size = header.size * 4;
-  if (expected_size < data.size()) {
+  if (data.size() < expected_size) {
     phosg::print_data(stderr, data);
     throw std::runtime_error(std::format(
         "command is incomplete: expected {:X} bytes, received {:X} bytes", expected_size, data.size()));
@@ -2106,35 +2121,46 @@ void Server::handle_CAx13_update_map_during_setup_t(std::shared_ptr<Client> c, c
       (this->registration_phase != RegistrationPhase::REGISTERED) &&
       (this->registration_phase != RegistrationPhase::BATTLE_STARTED)) {
     *this->map_and_rules = in_cmd.map_and_rules_state;
-    // The client will likely send incorrect values for the extended rules (or in the case of NTE, no values at all,
-    // since the Rules structure is smaller). So, use the values from the last chosen map if applicable, or the values
-    // from the $dicerange command if available.
-    Language language = c ? c->language() : Language::ENGLISH;
-    const Rules* map_rules = this->last_chosen_map ? &this->last_chosen_map->version(language)->map->default_rules : nullptr;
-    auto& server_rules = this->map_and_rules->rules;
-    // NTE can specify the DEF dice value range in its Rules struct, so we use that unless the map or $dicerange
-    // overrides it.
-    server_rules.def_dice_value_range = (map_rules && (map_rules->def_dice_value_range != 0xFF))
-        ? map_rules->def_dice_value_range
-        : (this->def_dice_value_range_override != 0xFF)
-        ? this->def_dice_value_range_override
-        : this->options.is_nte()
-        ? server_rules.def_dice_value_range
-        : 0;
-    server_rules.atk_dice_value_range_2v1 = (map_rules && (map_rules->atk_dice_value_range_2v1 != 0xFF))
-        ? map_rules->atk_dice_value_range_2v1
-        : (this->atk_dice_value_range_2v1_override != 0xFF)
-        ? this->atk_dice_value_range_2v1_override
-        : 0;
-    server_rules.def_dice_value_range_2v1 = (map_rules && (map_rules->def_dice_value_range_2v1 != 0xFF))
-        ? map_rules->def_dice_value_range_2v1
-        : (this->def_dice_value_range_2v1_override != 0xFF)
-        ? this->def_dice_value_range_2v1_override
-        : 0;
 
     // If this match is part of a tournament, ignore the rules sent by the client and use the tournament rules instead.
+    auto& server_rules = this->map_and_rules->rules;
     if (this->options.tournament) {
-      this->map_and_rules->rules = this->options.tournament->get_rules();
+      server_rules = this->options.tournament->get_rules();
+
+    } else {
+      // The client will likely send incorrect values for the extended rules (or in the case of NTE, no values at all,
+      // since the Rules structure is smaller). So, use the values from the last chosen map if applicable, or the values
+      // from the $dicerange command if available. Furthermore, NTE can specify the DEF dice value range in its Rules
+      // struct, so we use that unless the map or $dicerange overrides it.
+      Language language = c ? c->language() : Language::ENGLISH;
+      const Rules* map_rules = this->last_chosen_map
+          ? &this->last_chosen_map->version(language)->map->default_rules
+          : nullptr;
+      server_rules.def_dice_value_range = (map_rules && (map_rules->def_dice_value_range != 0xFF))
+          ? map_rules->def_dice_value_range
+          : (this->def_dice_value_range_override != 0xFF)
+          ? this->def_dice_value_range_override
+          : this->options.is_nte()
+          ? server_rules.def_dice_value_range
+          : 0;
+      server_rules.atk_dice_value_range_2v1 = (map_rules && (map_rules->atk_dice_value_range_2v1 != 0xFF))
+          ? map_rules->atk_dice_value_range_2v1
+          : (this->atk_dice_value_range_2v1_override != 0xFF)
+          ? this->atk_dice_value_range_2v1_override
+          : 0;
+      server_rules.def_dice_value_range_2v1 = (map_rules && (map_rules->def_dice_value_range_2v1 != 0xFF))
+          ? map_rules->def_dice_value_range_2v1
+          : (this->def_dice_value_range_2v1_override != 0xFF)
+          ? this->def_dice_value_range_2v1_override
+          : 0;
+      server_rules.lone_player = (map_rules && (map_rules->lone_player != 0xFF))
+          ? map_rules->lone_player
+          : (this->lone_player != 0xFF)
+          ? this->lone_player
+          : 0;
+      if (server_rules.lone_player > 0) {
+        this->map_and_rules->num_team0_players = this->map_and_rules->num_players - 1;
+      }
     }
 
     if (this->override_environment_number != 0xFF) {
@@ -2182,8 +2208,7 @@ void Server::handle_CAx14_update_deck_during_setup(std::shared_ptr<Client>, cons
         if (this->options.behavior_flags & BehaviorFlag::IGNORE_CARD_COUNTS) {
           verify_error = this->ruler_server->verify_deck(entry.card_ids);
         } else {
-          verify_error = this->ruler_server->verify_deck(entry.card_ids,
-              &this->client_card_counts[in_cmd.client_id]);
+          verify_error = this->ruler_server->verify_deck(entry.card_ids, &this->client_card_counts[in_cmd.client_id]);
         }
       }
       if (verify_error) {
@@ -2192,7 +2217,18 @@ void Server::handle_CAx14_update_deck_during_setup(std::shared_ptr<Client>, cons
       if (!this->options.is_nte() && !(this->options.behavior_flags & BehaviorFlag::SKIP_D1_D2_REPLACE)) {
         this->ruler_server->replace_D1_D2_rank_cards_with_Attack(entry.card_ids);
       }
-      *this->deck_entries[in_cmd.client_id] = in_cmd.entry;
+      auto& this_deck_entry = this->deck_entries[in_cmd.client_id];
+      *this_deck_entry = entry;
+
+      // The client has a bug that causes it to crash when the player opens the pause menu if team 1 has more than two
+      // players, so we always assign the lone player to team 1. If team 0 has more than two players, there are
+      // graphical issues in the pause menu, but it doesn't crash.
+      if (this->map_and_rules->rules.lone_player >= 5) {
+        this_deck_entry->team_id = (in_cmd.client_id == (this->map_and_rules->rules.lone_player - 5));
+      } else if (this->map_and_rules->rules.lone_player >= 1) {
+        this_deck_entry->team_id =
+            (this->counter_slot_for_client_id(in_cmd.client_id) == this->map_and_rules->rules.lone_player);
+      }
       this->presence_entries[in_cmd.client_id].player_present = true;
       this->presence_entries[in_cmd.client_id].is_cpu_player = in_cmd.is_cpu_player;
       this->set_player_deck_valid(in_cmd.client_id);
@@ -2245,7 +2281,7 @@ void Server::handle_CAx1B_update_player_name(std::shared_ptr<Client>, const std:
       auto ps = this->player_states[in_cmd.entry.client_id];
       if (ps && ps->hand_and_equip && !ps->hand_and_equip->is_cpu_player) {
         ps->hand_and_equip->is_cpu_player = 1;
-        this->send_6xB4x02_for_all_players_if_needed();
+        this->send_6xB4x02_for_all_players_if_needed(true);
       }
     }
   }
@@ -2342,7 +2378,7 @@ void Server::handle_CAx28_end_defense_list(std::shared_ptr<Client>, const std::s
     }
   }
 
-  if (all_defense_lists_ended && (this->unknown_a10 == 0)) {
+  if (all_defense_lists_ended && !this->attack_resolution_pending) {
     for (size_t z = 0; z < 4; z++) {
       auto ps = this->player_states[z];
       if (ps) {
@@ -2350,16 +2386,16 @@ void Server::handle_CAx28_end_defense_list(std::shared_ptr<Client>, const std::s
         ps->update_hand_and_equip_state_and_send_6xB4x02_if_needed();
       }
     }
-    this->unknown_8023EE48();
-    this->unknown_a10 = 1;
+    this->prepare_attack_resolution_and_send_updates();
+    this->attack_resolution_pending = true;
   } else {
     auto ps = this->player_states[in_cmd.client_id];
     ps->assist_flags |= AssistFlag::READY_TO_END_ACTION_PHASE;
     ps->update_hand_and_equip_state_and_send_6xB4x02_if_needed();
   }
-  if (this->unknown_a10 != 0) {
-    this->unknown_8023EE80();
-    this->unknown_a10 = 0;
+  if (this->attack_resolution_pending) {
+    this->resolve_current_attack_and_advance();
+    this->attack_resolution_pending = false;
   }
 
   G_ActionResult_Ep3_6xB4x1E out_cmd_fin;
@@ -2416,8 +2452,7 @@ void Server::handle_CAx34_subtract_ally_atk_points(std::shared_ptr<Client>, cons
         if (ce->def.ally_cost <= ally_ps->get_atk_points()) {
           auto& pa = this->pb_action_states[card_ref_client_id];
           if (this->num_pending_attacks < 0x20) {
-            this->num_pending_attacks++;
-            this->pending_attacks[this->num_pending_attacks] = pa;
+            this->pending_attacks[this->num_pending_attacks++] = pa;
             this_ps->set_action_cards_for_action_state(pa);
             ally_ps->subtract_atk_points(ce->def.ally_cost);
             if (ce->def.ally_cost > 0) {
@@ -2449,7 +2484,8 @@ void Server::handle_CAx34_subtract_ally_atk_points(std::shared_ptr<Client>, cons
   }
 }
 
-void Server::handle_CAx37_client_ready_to_advance_from_starter_roll_phase(std::shared_ptr<Client>, const std::string& data) {
+void Server::handle_CAx37_client_ready_to_advance_from_starter_roll_phase(
+    std::shared_ptr<Client>, const std::string& data) {
   const auto& in_cmd = check_size_t<G_AdvanceFromStartingRollsPhase_Ep3_CAx37>(data);
   this->send_debug_command_received_message(in_cmd.client_id, in_cmd.header.subsubcommand, "CHOOSE ORDER");
   if (in_cmd.client_id >= 4) {
@@ -2553,7 +2589,8 @@ void Server::send_6xB6x41_to_all_clients() const {
     }
 
   } else {
-    auto out_data = this->prepare_6xB6x41_map_definition(this->last_chosen_map, Language::ENGLISH, false);
+    auto out_data = this->prepare_6xB6x41_map_definition(
+        this->last_chosen_map, Language::ENGLISH, this->options.is_nte());
     this->send(out_data.data(), out_data.size(), 0x6C, false);
   }
 }
@@ -2731,19 +2768,19 @@ uint32_t Server::send_6xB4x06_if_card_ref_invalid(uint16_t card_ref, int16_t neg
   return card_ref;
 }
 
-void Server::unknown_8023EEF4() {
-  auto log = this->log_stack("unknown_8023EEF4: ");
+void Server::prepare_next_valid_attack() {
+  auto log = this->log_stack("prepare_next_valid_attack: ");
 
-  if (this->unknown_a14 >= 0x20) {
-    log.debug_f("unknown_a14 too large (0x{:X})", this->unknown_a14);
+  if (this->current_attack_index >= 0x20) {
+    log.debug_f("current attack index too large (0x{:X})", this->current_attack_index);
     return;
   }
 
   bool is_nte = this->options.is_nte();
-  while (this->unknown_a14 < this->num_pending_attacks_with_cards) {
-    auto card = this->attack_cards[this->unknown_a14];
+  while (this->current_attack_index < this->num_pending_attacks_with_cards) {
+    auto card = this->attack_cards[this->current_attack_index];
     if (this->get_current_team_turn() == card->get_team_id()) {
-      ActionState as = this->pending_attacks_with_cards[this->unknown_a14];
+      ActionState as = this->pending_attacks_with_cards[this->current_attack_index];
       if (log.should_log(phosg::LogLevel::L_DEBUG)) {
         log.debug_f("card @{:04X} #{:04X} can attack", card->get_card_ref(), card->get_card_id());
         log.debug_f("as: {}", as.str(this->shared_from_this()));
@@ -2765,16 +2802,16 @@ void Server::unknown_8023EEF4() {
     } else {
       log.debug_f("card @{:04X} #{:04X} cannot attack (wrong turn)", card->get_card_ref(), card->get_card_id());
     }
-    this->unknown_a14++;
+    this->current_attack_index++;
   }
 
-  if (this->unknown_a14 < this->num_pending_attacks_with_cards) {
-    log.debug_f("a14 ({}) < num_pending_attacks_with_cards ({})", this->unknown_a14, this->num_pending_attacks_with_cards);
+  if (this->current_attack_index < this->num_pending_attacks_with_cards) {
+    log.debug_f("a14 ({}) < num_pending_attacks_with_cards ({})", this->current_attack_index, this->num_pending_attacks_with_cards);
     this->defense_list_ended_for_client.clear(false);
 
     G_UpdateAttackTargets_Ep3_6xB4x29 cmd;
-    cmd.attack_number = this->unknown_a14;
-    cmd.state = this->pending_attacks_with_cards[this->unknown_a14];
+    cmd.attack_number = this->current_attack_index;
+    cmd.state = this->pending_attacks_with_cards[this->current_attack_index];
     if (is_nte) {
       this->replace_targets_due_to_destruction_nte(&cmd.state);
     } else {
@@ -2786,19 +2823,20 @@ void Server::unknown_8023EEF4() {
     this->card_special->apply_effects_after_attack_target_resolution(as);
 
     if (!is_nte) {
-      this->attack_cards[this->unknown_a14]->compute_action_chain_results(1, 0);
-      this->attack_cards[this->unknown_a14]->unknown_80236374(this->attack_cards[this->unknown_a14], &as);
-      if (!this->attack_cards[this->unknown_a14]->action_chain.check_flag(0x40)) {
-        this->card_special->unknown_8024945C(this->attack_cards[this->unknown_a14], &as);
+      auto& attack_card = this->attack_cards[this->current_attack_index];
+      attack_card->compute_action_chain_results(1, 0);
+      attack_card->refresh_all_cards_for_attack(attack_card, &as);
+      if (!attack_card->action_chain.check_flag(0x40)) {
+        this->card_special->unknown_8024945C(attack_card, &as);
       }
-      this->attack_cards[this->unknown_a14]->compute_action_chain_results(1, 0);
-      this->attack_cards[this->unknown_a14]->unknown_80236374(this->attack_cards[this->unknown_a14], &as);
-      if (!this->attack_cards[this->unknown_a14]->action_chain.check_flag(0x40)) {
-        this->card_special->unknown_8024966C(this->attack_cards[this->unknown_a14], &as);
+      attack_card->compute_action_chain_results(1, 0);
+      attack_card->refresh_all_cards_for_attack(attack_card, &as);
+      if (!attack_card->action_chain.check_flag(0x40)) {
+        this->card_special->apply_attack_stat_and_damage_adjustment_effects(attack_card, &as);
       }
-      this->attack_cards[this->unknown_a14]->compute_action_chain_results(1, 0);
-      this->attack_cards[this->unknown_a14]->unknown_80236374(this->attack_cards[this->unknown_a14], &as);
-      this->attack_cards[this->unknown_a14]->send_6xB4x4E_4C_4D_if_needed();
+      attack_card->compute_action_chain_results(1, 0);
+      attack_card->refresh_all_cards_for_attack(attack_card, &as);
+      attack_card->send_6xB4x4E_4C_4D_if_needed();
       for (size_t z = 0; z < 4; z++) {
         auto ps = this->player_states[z];
         if (ps) {
@@ -3008,8 +3046,8 @@ void Server::replace_targets_due_to_destruction_or_conditions(ActionState* as) {
     auto target_card = this->card_for_set_card_ref(target_card_ref);
     if (target_card) {
       auto replaced_target = this->card_special->compute_replaced_target_based_on_conditions(
-          target_card->get_card_ref(), 1, 0, as->attacker_card_ref, 0xFFFF, 1,
-          0, 0xFF, 0, 0xFFFF);
+          target_card->get_card_ref(), true, false, as->attacker_card_ref,
+          0xFFFF, true, nullptr, 0xFF, nullptr, 0xFFFF);
       if (!replaced_target) {
         replaced_target = target_card;
       }
@@ -3047,42 +3085,42 @@ uint8_t Server::get_current_team_turn2() const {
   return this->current_team_turn2;
 }
 
-void Server::unknown_8023EE48() {
-  this->unknown_802402F4();
+void Server::prepare_attack_resolution_and_send_updates() {
+  this->recompute_attacking_team_action_chains();
   this->send_6xB4x02_for_all_players_if_needed();
 }
 
-void Server::unknown_8023EE80() {
+void Server::resolve_current_attack_and_advance() {
   bool is_nte = this->options.is_nte();
 
-  if (this->unknown_a14 < this->num_pending_attacks_with_cards) {
-    this->attack_cards[this->unknown_a14]->apply_attack_result();
+  if (this->current_attack_index < this->num_pending_attacks_with_cards) {
+    this->attack_cards[this->current_attack_index]->apply_attack_result();
     if (is_nte) {
       for (size_t z = 0; z < 4; z++) {
         auto ps = this->player_states[z];
         if (ps) {
-          ps->unknown_8023C110();
+          ps->reset_all_cards_attack_resolution_state();
         }
       }
     }
-    this->unknown_a14++;
+    this->current_attack_index++;
   }
 
   this->check_for_battle_end();
 
   if (is_nte) {
-    this->unknown_8023EEF4();
+    this->prepare_next_valid_attack();
     this->update_battle_state_flags_and_send_6xB4x03_if_needed();
     this->send_6xB4x02_for_all_players_if_needed();
   } else {
     this->copy_player_states_to_prev_states();
-    this->unknown_8023EEF4();
+    this->prepare_next_valid_attack();
     this->send_set_card_updates_and_6xB4x04_if_needed();
   }
 }
 
-void Server::unknown_802402F4() {
-  auto log = this->log_stack("unknown_802402F4: ");
+void Server::recompute_attacking_team_action_chains() {
+  auto log = this->log_stack("recompute_attacking_team_action_chains: ");
   for (size_t client_id = 0; client_id < 4; client_id++) {
     auto ps = this->player_states[client_id];
     if (ps && (this->current_team_turn2 == ps->get_team_id())) {
@@ -3173,6 +3211,44 @@ G_SetTrapTileLocations_Ep3_6xB4x50 Server::prepare_6xB4x50_trap_tile_locations()
 
 void Server::send_6xB4x50_trap_tile_locations() const {
   this->send(this->prepare_6xB4x50_trap_tile_locations());
+}
+
+void Server::clear_counter_slot(uint8_t counter_slot) {
+  this->counter_slot_to_client_id[counter_slot - 1] = 0xFF;
+}
+
+void Server::set_counter_slot_com(uint8_t counter_slot) {
+  this->counter_slot_to_client_id[counter_slot - 1] = 4;
+}
+
+void Server::set_counter_slot_human(uint8_t counter_slot, uint8_t client_id) {
+  this->counter_slot_to_client_id[counter_slot - 1] = client_id;
+}
+
+uint8_t Server::counter_slot_for_client_id(uint8_t client_id) {
+  std::array<uint8_t, 4> client_id_to_slot = {0xFF, 0xFF, 0xFF, 0xFF}; // Indexed as [client_id]; value is counter_slot
+
+  auto lowest_unused_id = [&]() -> uint8_t {
+    for (size_t z = 0; z < 4; z++) {
+      if (client_id_to_slot[z] == 0xFF) {
+        return z;
+      }
+    }
+    throw std::logic_error("All client IDs are used but there remain unassigned COM slots");
+  };
+
+  // Assign all human players, then assign COMs in increasing order of counter slot
+  for (size_t z = 0; z < 4; z++) {
+    if (this->counter_slot_to_client_id[z] < 4) {
+      client_id_to_slot[this->counter_slot_to_client_id[z]] = z;
+    }
+  }
+  for (size_t z = 0; z < 4; z++) {
+    if (this->counter_slot_to_client_id[z] == 4) {
+      client_id_to_slot[lowest_unused_id()] = z;
+    }
+  }
+  return client_id_to_slot.at(client_id) + 1;
 }
 
 } // namespace Episode3

@@ -171,7 +171,7 @@ static void url_decode_inplace(std::string& s) {
           static_cast<char>(phosg::value_for_hex_char(s[read_offset + 1]) << 4) |
           static_cast<char>(phosg::value_for_hex_char(s[read_offset + 2]));
       read_offset += 3;
-    } else if (s[write_offset] == '+') {
+    } else if (s[read_offset] == '+') {
       s[write_offset] = ' ';
       read_offset++;
     } else {
@@ -182,7 +182,8 @@ static void url_decode_inplace(std::string& s) {
   s.resize(write_offset);
 }
 
-HTTPClient::HTTPClient(asio::ip::tcp::socket&& sock) : r(std::move(sock)) {}
+HTTPClient::HTTPClient(asio::ip::tcp::socket&& sock)
+    : r(std::move(sock)), send_buffer_nonempty_signal(r.get_socket().get_executor()) {}
 
 asio::awaitable<HTTPRequest> HTTPClient::recv_http_request(size_t max_line_size, size_t max_body_size) {
   HTTPRequest req;
@@ -298,9 +299,6 @@ asio::awaitable<HTTPRequest> HTTPClient::recv_http_request(size_t max_line_size,
       if (parse_offset != line.size()) {
         throw HTTPError(400, "Invalid chunk header during chunked encoding");
       }
-      if (chunk_size == 0) {
-        break;
-      }
       total_data_bytes += chunk_size;
       if (total_data_bytes > max_body_size) {
         throw HTTPError(400, "Request data size too large");
@@ -310,7 +308,11 @@ asio::awaitable<HTTPRequest> HTTPClient::recv_http_request(size_t max_line_size,
       if (!after_chunk_data.empty()) {
         throw HTTPError(400, "Incorrect trailing sequence after chunk data");
       }
+      if (chunk_size == 0) {
+        break;
+      }
     }
+    req.data = phosg::join(chunks, "");
   } else {
     auto content_length_header = req.get_header("content-length");
     size_t content_length = content_length_header ? stoull(*content_length_header) : 0;
@@ -363,13 +365,14 @@ asio::awaitable<WebSocketMessage> HTTPClient::recv_websocket_message(size_t max_
   WebSocketMessage prev_msg;
   bool prev_msg_present = false;
 
-  while (this->r.get_socket().is_open()) {
+  while (!this->should_disconnect && this->r.get_socket().is_open()) {
     WebSocketMessage msg;
 
     // We need at most 10 bytes to determine if there's a valid frame, or as little as 2
     co_await this->r.read_data_into(msg.header, 2);
 
     // Get the payload size
+    msg.opcode = msg.header[0] & 0x0F;
     bool has_mask = msg.header[1] & 0x80;
     size_t payload_size = msg.header[1] & 0x7F;
     if (payload_size == 0x7F) {
@@ -384,6 +387,11 @@ asio::awaitable<WebSocketMessage> HTTPClient::recv_websocket_message(size_t max_
 
     if (payload_size > max_data_size) {
       throw std::runtime_error("Incoming WebSocket message exceeds size limit");
+    }
+    // If it's not a control message, check if adding the fragment to the previous message would cause the previous
+    // message to exceed the length limit
+    if (!(msg.opcode & 0x08) && prev_msg_present && (prev_msg.data.size() + payload_size > max_data_size)) {
+      throw std::runtime_error("Incoming fragmented WebSocket message exceeds size limit");
     }
 
     // Read the masking key if present
@@ -403,31 +411,30 @@ asio::awaitable<WebSocketMessage> HTTPClient::recv_websocket_message(size_t max_
 
     // If the current message is a control message, respond appropriately (these can be sent in the middle of
     // fragmented messages)
-    uint8_t opcode = msg.header[0] & 0x0F;
-    if (opcode & 0x08) {
-      if (opcode == 0x0A) {
+    if (msg.opcode & 0x08) {
+      if (msg.opcode == 0x0A) {
         // Ping response; ignore it
 
-      } else if (opcode == 0x08) {
+      } else if (msg.opcode == 0x08) {
         // Close message
-        co_await this->send_websocket_message(msg.data, msg.opcode);
-        this->r.close();
+        this->send_websocket_message(std::move(msg.data), msg.opcode);
+        this->disconnect();
 
-      } else if (opcode == 0x09) {
+      } else if (msg.opcode == 0x09) {
         // Ping message
-        co_await this->send_websocket_message(msg.data, 0x0A);
+        this->send_websocket_message(std::move(msg.data), 0x0A);
 
       } else {
         // Unknown control message type
-        this->r.close();
+        this->disconnect();
       }
       continue;
     }
 
     // If there's an existing fragment, the current message's opcode should be zero; if there's no pending message, it
     // must not be zero
-    if (prev_msg_present == (opcode != 0)) {
-      this->r.close();
+    if (prev_msg_present == (msg.opcode != 0)) {
+      this->disconnect();
       continue;
     }
 
@@ -437,7 +444,7 @@ asio::awaitable<WebSocketMessage> HTTPClient::recv_websocket_message(size_t max_
     } else {
       prev_msg.header[0] = msg.header[0];
       prev_msg.header[1] = msg.header[1];
-      if (opcode) {
+      if (msg.opcode) {
         prev_msg.opcode = msg.opcode;
       }
       if (has_mask) {
@@ -454,13 +461,15 @@ asio::awaitable<WebSocketMessage> HTTPClient::recv_websocket_message(size_t max_
     // message.
     if (prev_msg.header[0] & 0x80) {
       co_return prev_msg;
+    } else {
+      prev_msg_present = true;
     }
   }
 
-  throw std::logic_error("failed to receive websocket message");
+  throw std::runtime_error("WebSocket disconnected while waiting to receive");
 }
 
-asio::awaitable<void> HTTPClient::send_websocket_message(const void* data, size_t size, uint8_t opcode) {
+std::string HTTPClient::generate_websocket_message_header(uint8_t opcode, size_t size) {
   phosg::StringWriter w;
   w.put_u8(0x80 | (opcode & 0x0F));
   if (size > 0xFFFF) {
@@ -472,13 +481,66 @@ asio::awaitable<void> HTTPClient::send_websocket_message(const void* data, size_
   } else {
     w.put_u8(size);
   }
-
-  std::array<asio::const_buffer, 2> bufs = {asio::const_buffer(w.data(), w.size()), asio::const_buffer(data, size)};
-  co_await asio::async_write(this->r.get_socket(), bufs, asio::use_awaitable);
+  return std::move(w.str());
 }
 
-asio::awaitable<void> HTTPClient::send_websocket_message(const std::string& data, uint8_t opcode) {
-  return this->send_websocket_message(data.data(), data.size(), opcode);
+void HTTPClient::send_websocket_message(std::string&& data, uint8_t opcode) {
+  this->outbound_data.emplace_back(this->generate_websocket_message_header(opcode, data.size()));
+  this->outbound_data.emplace_back(std::move(data));
+  this->send_buffer_nonempty_signal.set();
+}
+
+void HTTPClient::send_websocket_message(std::shared_ptr<const std::string> data, uint8_t opcode) {
+  this->outbound_data.emplace_back(this->generate_websocket_message_header(opcode, data->size()));
+  this->outbound_data.emplace_back(std::move(data));
+  this->send_buffer_nonempty_signal.set();
+}
+
+void HTTPClient::enable_websockets() {
+  this->is_websocket = true;
+  asio::co_spawn(
+      this->r.get_socket().get_executor(), HTTPClient::websocket_send_task(this->shared_from_this()), asio::detached);
+}
+
+void HTTPClient::disconnect() {
+  if (this->is_websocket) {
+    this->should_disconnect = true;
+    this->send_buffer_nonempty_signal.set();
+  } else {
+    this->r.close();
+  }
+}
+
+asio::awaitable<void> HTTPClient::websocket_send_task(std::shared_ptr<HTTPClient> client) {
+  while (client->r.get_socket().is_open()) {
+    std::deque<std::variant<std::string, std::shared_ptr<const std::string>>> to_send;
+    to_send.swap(client->outbound_data);
+
+    if (!to_send.empty()) {
+      std::vector<asio::const_buffer> bufs;
+      bufs.reserve(to_send.size());
+      for (const auto& it : to_send) {
+        if (std::holds_alternative<std::string>(it)) {
+          const std::string& str = std::get<std::string>(it);
+          bufs.emplace_back(asio::buffer(str.data(), str.size()));
+        } else if (std::holds_alternative<std::shared_ptr<const std::string>>(it)) {
+          const std::string* str = std::get<std::shared_ptr<const std::string>>(it).get();
+          bufs.emplace_back(asio::buffer(str->data(), str->size()));
+        }
+      }
+      co_await asio::async_write(client->r.get_socket(), bufs, asio::use_awaitable);
+      to_send.clear();
+    }
+
+    if (client->outbound_data.empty()) {
+      if (client->should_disconnect) {
+        client->r.get_socket().close();
+      } else {
+        client->send_buffer_nonempty_signal.clear();
+        co_await client->send_buffer_nonempty_signal.wait();
+      }
+    }
+  }
 }
 
 const HTTPServerLimits DEFAULT_HTTP_LIMITS;

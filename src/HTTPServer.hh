@@ -7,7 +7,8 @@
 #include <variant>
 
 #include "AsyncHTTPServer.hh"
-#include "ServerState.hh"
+
+class ServerState;
 
 enum class HTTPEventType {
   PLAYER_LOGIN = 0,
@@ -45,7 +46,7 @@ public:
   HTTPServer& operator=(HTTPServer&&) = delete;
   virtual ~HTTPServer() = default;
 
-  asio::awaitable<void> send_event_notification(HTTPEventType type, std::shared_ptr<const phosg::JSON> message);
+  void send_event_notification(HTTPEventType type, std::shared_ptr<const phosg::JSON> message);
 
   inline bool event_enabled(HTTPEventType type) const {
     return !this->subscribers_for_event_type(type).empty();
@@ -88,6 +89,6 @@ void send_http_event_notif(ServerStateT&& s, HTTPEventType type, FnT&& fn) {
     json->emplace("EventType", name_for_http_event_type(type));
     json->emplace("ServerTimestamp", phosg::format_time(timestamp));
     json->emplace("ServerTimestampUsecs", timestamp);
-    asio::co_spawn(*s->io_context, s->http_server->send_event_notification(type, std::move(json)), asio::detached);
+    s->http_server->send_event_notification(type, std::move(json));
   }
 }
