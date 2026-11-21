@@ -413,20 +413,38 @@ ChatCommandDefinition cc_bank(
       }
 
       ssize_t new_char_index = a.text.empty() ? (a.c->bb_character_index + 1) : stol(a.text, nullptr, 0);
+      ssize_t target_bank_index = (new_char_index <= 0) ? -1 : (new_char_index - 1);
 
-      if (new_char_index <= 0) {
-        a.c->change_bank(-1);
-        send_text_message(a.c, "$C6Using shared bank");
-
-      } else if (new_char_index <= 127) {
-        a.c->change_bank(new_char_index - 1);
-        send_text_message_fmt(a.c, "$C6Using character {}'s bank", new_char_index);
-
-      } else {
+      if (new_char_index > 127) {
         throw precondition_failed("$C6Invalid bank number");
       }
+      if (target_bank_index >= 0 && target_bank_index != a.c->bb_character_index) {
+        if (!a.c->login || !a.c->login->bb_license) {
+          throw precondition_failed("$C6Client is not logged in");
+        }
+        const auto& username = a.c->login->bb_license->username;
+        if (!std::filesystem::is_regular_file(Client::bank_filename(username, target_bank_index)) &&
+            !std::filesystem::is_regular_file(Client::character_filename(username, target_bank_index))) {
+          throw precondition_failed("$C6No character exists\nin that slot");
+        }
+      }
 
-      auto bank = a.c->bank_file();
+      ssize_t prev_bank_index = a.c->bb_bank_character_index;
+      a.c->change_bank(target_bank_index);
+      std::shared_ptr<PlayerBank> bank;
+      try {
+        bank = a.c->bank_file();
+      } catch (...) {
+        a.c->bb_bank_character_index = prev_bank_index;
+        throw;
+      }
+
+      if (target_bank_index < 0) {
+        send_text_message(a.c, "$C6Using shared bank");
+      } else {
+        send_text_message_fmt(a.c, "$C6Using character {}'s bank", new_char_index);
+      }
+
       bank->assign_ids(0x99000000 + (a.c->lobby_client_id << 20));
       a.c->log.info_f("Assigned bank item IDs");
       a.c->print_bank();
