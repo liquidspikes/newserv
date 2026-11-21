@@ -14,6 +14,7 @@
 #include "ChatCommands.hh"
 #include "Compression.hh"
 #include "Episode3/Tournament.hh"
+#include "ExpressionEnvironment.hh"
 #include "GameServer.hh"
 #include "HTTPServer.hh"
 #include "IPStackSimulator.hh"
@@ -606,7 +607,12 @@ static asio::awaitable<void> on_04_U(std::shared_ptr<Client> c, Channel::Message
     const auto& [host, port] = *s->data->proxy_destination_patch;
     co_await start_proxy_session(c, host, port, false);
 
+  } else if (c->patch_checksum_requests_sent) {
+    throw std::runtime_error("checksum requests have already been sent");
+
   } else {
+    c->patch_checksum_requests_sent = true;
+
     // No proxy destination; continue with normal patch logic
     bool is_bb = (c->version() == Version::BB_PATCH);
     const std::string& message = is_bb ? s->data->bb_patch_server_message : s->data->pc_patch_server_message;
@@ -654,6 +660,11 @@ asio::awaitable<void> on_0F_U(std::shared_ptr<Client> c, Channel::Message& msg) 
 }
 
 asio::awaitable<void> on_10_U(std::shared_ptr<Client> c, Channel::Message&) {
+  if (c->patch_checksum_responses_received) {
+    throw std::runtime_error("checksum responses have already been received");
+  }
+  c->patch_checksum_responses_received = true;
+
   S_StartFileDownloads_Patch_11 start_cmd = {0, 0};
   for (const auto& req : c->patch_file_checksum_requests) {
     if (!req.response_received) {
@@ -2869,7 +2880,12 @@ static void on_10_quest_menu(std::shared_ptr<Client> c, uint32_t item_id) {
       send_lobby_message_box(c, "$C7Quest does not exist\nfor this game version.");
       return;
     }
-    vq = vq->create_download_quest(c->language());
+    // On BB, Sega apparently removed the pr2 encoding for download quests, but the rest of the flow seems like a relic
+    // from the Xbox implementation - if you send a download quest to a BB client, you get a message saying the Xbox
+    // doesn't have enough free blocks to save the quest data. We implement the format BB apparently expects anyway.
+    if (c->version() != Version::BB_V4) {
+      vq = vq->create_download_quest(c->language());
+    }
     std::string xb_filename = vq->xb_filename();
     QuestFileType type = vq->pvr_contents ? QuestFileType::DOWNLOAD_WITH_PVR : QuestFileType::DOWNLOAD_WITHOUT_PVR;
     send_open_quest_file(c, q->meta.name, vq->bin_filename(), xb_filename, vq->meta.quest_number, type, vq->bin_contents);
@@ -3589,20 +3605,15 @@ static asio::awaitable<void> on_30(std::shared_ptr<Client> c, Channel::Message& 
     switch (c->version()) {
       case Version::DC_V2:
         ch = PSOBBCharacterFile::create_from_file(msg.check_size_t<PSODCV2CharacterFile::Character>());
-        ch->inventory.decode_from_client(c->version());
         break;
       case Version::GC_NTE:
         ch = PSOBBCharacterFile::create_from_file(msg.check_size_t<PSOGCNTECharacterFileCharacter>());
-        ch->inventory.decode_from_client(c->version());
         break;
       case Version::GC_V3:
         ch = PSOBBCharacterFile::create_from_file(msg.check_size_t<PSOGCCharacterFile::Character>());
-        // Note: We don't call ch->inventory.decode_from_client here because the data is sent in the game's native byte
-        // order, which is already correct on GC (unlike for 61/98)
         break;
       case Version::XB_V3:
         ch = PSOBBCharacterFile::create_from_file(msg.check_size_t<PSOXBCharacterFile::Character>());
-        ch->inventory.decode_from_client(c->version());
         break;
       case Version::GC_EP3_NTE:
       case Version::GC_EP3:
@@ -4634,7 +4645,7 @@ std::shared_ptr<Lobby> create_game_generic(
   game->base_exp_multiplier = s->data->bb_global_exp_multiplier;
   game->exp_share_multiplier = s->data->exp_share_multiplier;
 
-  const std::unordered_map<uint16_t, IntegralExpression>* quest_flag_rewrites;
+  const std::unordered_map<uint16_t, std::unique_ptr<ResourceDASM::Expression::Node>>* quest_flag_rewrites;
   switch (creator_c->version()) {
     case Version::DC_NTE:
     case Version::DC_11_2000:
@@ -4749,18 +4760,18 @@ std::shared_ptr<Lobby> create_game_generic(
   }
 
   if (quest_flag_rewrites && !quest_flag_rewrites->empty()) {
-    IntegralExpression::Env env = {
-        .section_id = game->effective_section_id(),
-        .difficulty = game->difficulty,
-        .flags = &p->quest_flags,
-        .challenge_records = &p->challenge_records,
-        .team = creator_c->team(),
+    ExpressionEnvironment env{
         .num_players = 1,
+        .section_id = game->effective_section_id(),
         .event = game->event,
         .v1_present = is_v1(creator_c->version()),
+        .difficulty = game->difficulty,
+        .quest_flags = &p->quest_flags,
+        .challenge_records = &p->challenge_records,
+        .team = creator_c->team().get(),
     };
     for (const auto& it : *quest_flag_rewrites) {
-      bool should_set = it.second.evaluate(env);
+      bool should_set = env.evaluate(*it.second);
       game->log.info_f("Overriding quest flag {:04X} = {}", it.first, should_set ? "true" : "false");
       if (should_set) {
         game->quest_flag_values->set(game->difficulty, it.first);
@@ -5026,7 +5037,11 @@ static asio::awaitable<void> on_6F(std::shared_ptr<Client> c, Channel::Message& 
     l->ep3_server.reset();
   }
 
-  send_server_time(c);
+  if (c->version() == Version::GC_EP3) {
+    // Client has loaded into the Morgue or spectator waiting room; the HUD object with the metadata does not exist
+    c->ep3_game_metadata_text.clear();
+  }
+
   if (c->check_flag(Client::Flag::DEBUG_ENABLED)) {
     std::string variations_str;
     for (size_t z = 0; z < l->variations.entries.size(); z++) {
@@ -5082,8 +5097,9 @@ static asio::awaitable<void> on_6F(std::shared_ptr<Client> c, Channel::Message& 
     if (!watched_lobby->ep3_server->battle_finished) {
       watched_lobby->ep3_server->send_commands_for_joining_spectator(c->channel);
     }
-    send_ep3_update_game_metadata(watched_lobby);
   }
+
+  send_server_time(c);
 
   // If there are more players to bring in, try to do so
   c->disconnect_hooks.erase(ADD_NEXT_CLIENT_DISCONNECT_HOOK_NAME);
@@ -5093,16 +5109,16 @@ static asio::awaitable<void> on_6F(std::shared_ptr<Client> c, Channel::Message& 
 static asio::awaitable<void> on_99(std::shared_ptr<Client> c, Channel::Message& msg) {
   check_size_v(msg.data.size(), 0);
 
-  // This is an odd place to send 6xB4x52, but there's a reason for it. If the client receives 6xB4x52 while it's
-  // loading the battlefield, it won't set the spectator count or top-bar text. But the client doesn't send anything
-  // when it's done loading the battlefield, so we have to have some other way of knowing when it's ready. We do this
-  // by sending a B1 (server time) command immediately after the E8 (join spectator team) command, which allows us to
-  // delay sending the 6xB4x52 until the server responds with a 99 command after loading is done.
+  // This is an odd place to send 6xB4x52, but there's a reason for it. If the client receives 6xB4x52 before the
+  // battlefield HUD loads, it won't set the spectator count or top-bar text. But the client doesn't send anything when
+  // it's done loading the battlefield, so we have to have some other way of knowing when it's ready. We do this by
+  // sending a B1 (server time) command immediately after the 6xB4x05 or 6xB4x3B commands, which allows us to delay
+  // sending the 6xB4x52 until the server responds with a 99 command after loading is done.
   auto l = c->lobby.lock();
-  if (l && l->is_game() && (l->episode == Episode::EP3) && l->check_flag(Lobby::Flag::IS_SPECTATOR_TEAM)) {
-    auto watched_l = l->watched_lobby.lock();
-    if (watched_l) {
-      send_ep3_update_game_metadata(watched_l);
+  if (l && l->is_game() && l->is_ep3()) {
+    auto effective_l = l->check_flag(Lobby::Flag::IS_SPECTATOR_TEAM) ? l->watched_lobby.lock() : l;
+    if (effective_l && effective_l->ep3_server && !effective_l->ep3_server->battle_finished) {
+      send_ep3_update_game_metadata(c);
     }
   }
 
@@ -5199,14 +5215,16 @@ static asio::awaitable<void> on_D2_V3_BB(std::shared_ptr<Client> c, Channel::Mes
   auto s = c->require_server_state();
   auto complete_trade_for_side = [s, l](std::shared_ptr<Client> c, std::shared_ptr<Client> other_c) -> void {
     if (c->version() == Version::BB_V4) {
+      const auto& stack_limits = *s->data->item_stack_limits(c->version());
+
       // On BB, the server generates the delete/create item commands
       auto p = c->character_file();
       auto other_p = other_c->character_file();
 
       // Delete items that are being given away
       for (const auto& item : c->pending_item_trade->items) {
-        size_t amount = item.stack_size(*s->data->item_stack_limits(c->version()));
-        p->remove_item(item.id, amount, *s->data->item_stack_limits(c->version()));
+        size_t amount = item.stack_size(stack_limits);
+        p->remove_item(item.id, amount, stack_limits);
 
         // This is a special case: when the trade is executed, the client deletes the traded items from its own
         // inventory automatically, so we should NOT send the 6x29 to that client; we should only send it to the other
@@ -5222,7 +5240,7 @@ static asio::awaitable<void> on_D2_V3_BB(std::shared_ptr<Client> c, Channel::Mes
       for (const auto& trade_item : other_c->pending_item_trade->items) {
         ItemData added_item = trade_item;
         added_item.id = l->generate_item_id(c->lobby_client_id);
-        p->add_item(added_item, *s->data->item_stack_limits(c->version()));
+        p->add_item(added_item, stack_limits);
         send_create_inventory_item_to_lobby(c, c->lobby_client_id, added_item);
       }
       send_command(c, 0xD3, 0x00);
@@ -5451,7 +5469,7 @@ static asio::awaitable<void> on_EA_BB(std::shared_ptr<Client> c, Channel::Messag
         bool is_removing_self = (cmd.guild_card_number == c->login->account->account_id);
         if (is_removing_self ||
             (team->members.at(c->login->account->account_id).privilege_level() >= 0x30)) {
-          s->team_index->remove_member(cmd.guild_card_number);
+          s->team_index->remove_member(team->team_id, cmd.guild_card_number);
           auto removed_account = s->account_index->from_account_id(cmd.guild_card_number);
           removed_account->bb_team_id = 0;
           removed_account->save();
@@ -5814,7 +5832,7 @@ static on_command_t handlers[0x100][NUM_VERSIONS] = {
 /* A3 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     nullptr,        nullptr,        nullptr,        nullptr,        nullptr,        nullptr},
 /* A4 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     nullptr,        nullptr,        nullptr,        nullptr,        nullptr,        nullptr},
 /* A5 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     nullptr,        nullptr,        nullptr,        nullptr,        nullptr,        nullptr},
-/* A6 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     on_ignored,     on_ignored,     on_ignored,     on_ignored,     on_ignored,     nullptr},
+/* A6 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     on_ignored,     on_ignored,     on_ignored,     on_ignored,     on_ignored,     on_ignored},
 /* A7 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     on_13_A7_V3_V4, on_13_A7_V3_V4, on_13_A7_V3_V4, on_13_A7_V3_V4, on_13_A7_V3_V4, on_13_A7_V3_V4},
 /* A8 */ {nullptr, nullptr, nullptr,        nullptr,        nullptr,        nullptr,        nullptr,     nullptr,     nullptr,        nullptr,        nullptr,        nullptr,        nullptr,        nullptr},
 /* A9 */ {nullptr, nullptr, on_A9,          on_A9,          on_A9,          on_A9,          on_A9,       on_A9,       on_A9,          on_A9,          on_A9,          on_A9,          on_A9,          on_A9},

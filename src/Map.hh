@@ -167,7 +167,7 @@ public:
     /* 08 */ le_uint16_t entity_id = 0; // == index + 0x4000; used by PSO at runtime, unused in DAT file
     /* 0A */ le_uint16_t group = 0;
     /* 0C */ le_uint16_t room = 0;
-    /* 0E */ le_uint16_t unknown_a3 = 0;
+    /* 0E */ parray<uint8_t, 2> unused = 0;
     // The position is relative to the room in which the object is placed; to get the actual world position, the
     // object's position must be rotated around the room's origin by the room's angles, then translated by the room's
     // offset. The room's angle and offset can be found in the area's n.rel file.
@@ -199,9 +199,9 @@ public:
     /* 0C */ le_uint16_t room = 0;
     /* 0E */ le_uint16_t wave_number = 0;
     /* 10 */ le_uint16_t wave_number2 = 0;
-    /* 12 */ le_uint16_t unknown_a1 = 0;
+    /* 12 */ parray<uint8_t, 2> unused = 0;
     /* 14 */ VectorXYZF pos;
-    /* 24 */ VectorXYZI angle;
+    /* 20 */ VectorXYZI angle;
     // See notes in dat_enemy_definitions in Map.cc for how these are used
     /* 2C */ le_float param1 = 0.0f;
     /* 30 */ le_float param2 = 0.0f;
@@ -959,6 +959,10 @@ public:
   std::vector<std::shared_ptr<EnemyState>> enemy_set_states;
   std::vector<std::shared_ptr<EventState>> event_states;
   std::vector<size_t> bb_rare_enemy_indexes;
+  // Boss fights whose kill has been counted for each player (key: floor << 32 | the boss's enemy set; value: one bit
+  // per lobby client ID), so that a boss made of several entities counts once per player per fight in the kill counts
+  // reported to /y/clients. Cleared by reset(), so a restarted battle or challenge counts again.
+  std::unordered_map<uint64_t, uint8_t> boss_kills_counted;
   size_t dynamic_obj_base_k_id = 0;
   std::array<size_t, NUM_VERSIONS> dynamic_obj_base_index_for_version = {};
 
@@ -1058,5 +1062,5 @@ struct RoomLayoutIndex {
   std::unordered_map<uint64_t, Room> rooms;
 
   explicit RoomLayoutIndex(const phosg::JSON& json);
-  const Room& get_room(uint8_t area, uint8_t major_var, uint32_t room_id) const;
+  const Room& get_room(uint8_t area, uint8_t layout_var, uint32_t room_id) const;
 };

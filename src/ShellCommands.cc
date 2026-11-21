@@ -185,7 +185,8 @@ ShellCommand c_reload(
       auto types = phosg::split(args.args, ' ');
       for (const auto& type : types) {
         if (type == "all") {
-          args.s->data->load_all();
+          // TODO: It'd be nice to use the existing thread pool here instead of using new temporary threads
+          args.s->data->load_all(args.s->data->num_worker_threads);
           args.s->disconnect_all_banned_clients();
           args.s->update_default_lobby_events_from_config();
         } else if (type == "bb-keys") {
@@ -226,6 +227,7 @@ ShellCommand c_reload(
         } else if (type == "drop-tables") {
           args.s->data->load_drop_tables();
         } else if (type == "config") {
+          args.s->data->load_config_before();
           args.s->data->load_config_early();
           args.s->data->load_config_late();
           args.s->disconnect_all_banned_clients();
@@ -233,6 +235,7 @@ ShellCommand c_reload(
         } else if (type == "teams") {
           args.s->load_teams();
         } else if (type == "quests") {
+          args.s->data->load_quest_opcode_defs();
           args.s->data->load_quest_index();
         } else {
           throw std::runtime_error("invalid data type: " + type);

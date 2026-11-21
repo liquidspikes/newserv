@@ -1,5 +1,7 @@
 #pragma once
 
+#include <math.h>
+
 #include <phosg/Encoding.hh>
 #include <phosg/Strings.hh>
 #include <phosg/Vector.hh>
@@ -217,7 +219,7 @@ public:
     return ret;
   }
 
-  uint32_t write(const std::string& data) {
+  uint32_t write(std::string_view data) {
     uint32_t ret = this->w.size();
     this->w.write(data);
     return ret;

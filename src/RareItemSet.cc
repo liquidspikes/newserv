@@ -25,35 +25,42 @@ std::string RareItemSet::ExpandedDrop::str(std::shared_ptr<const ItemNameIndex> 
 }
 
 uint32_t RareItemSet::expand_rate(uint8_t pc) {
-  // To compute the actual rare drop rate from pc, first decode pc:
+  // If pc is 0, the resulting rate is 0. Otherwise, to compute the actual rare drop rate from pc, first decode pc:
   //   pc = bits SSSSSVVV
   //   shift = S - 4 (so shift is 0-27)
   //   value = V + 7 (so value is 7-14)
   // Then, take the value 0x00000002, shift it left by shift (0-27), and multiply the result by value (7-14) to get the
   // actual drop rate. The result is a probability out of 0xFFFFFFFF (so 0x40000000 means the item will drop 25% of the
   // time, for example).
-  int8_t shift = ((pc >> 3) & 0x1F) - 4;
-  if (shift < 0) {
-    shift = 0;
+  if (!pc) {
+    return 0;
+  } else {
+    int8_t shift = ((pc >> 3) & 0x1F) - 4;
+    if (shift < 0) {
+      shift = 0;
+    }
+    return ((2 << shift) * ((pc & 7) + 7));
   }
-  return ((2 << shift) * ((pc & 7) + 7));
 }
 
 uint8_t RareItemSet::compress_rate(uint32_t probability) {
-  if (probability <= 0x0000000E) {
+  if (probability == 0) {
     return 0x00;
+  } else if (probability <= 0x0000000F) {
+    return 0x01;
   } else if (probability <= 0x0000001C) {
     return ((probability >> 1) - 7);
   } else {
     uint8_t zeroes = std::countl_zero(probability);
-    return ((31 - zeroes) << 3) | std::min<uint8_t>(7, (probability >> (28 - zeroes)) - 7);
+    uint8_t ret = ((31 - zeroes) << 3) | std::min<uint8_t>(7, (probability >> (28 - zeroes)) - 7);
+    return (ret == 0) ? 8 : ret;
   }
 }
 
 RareItemSet::ParsedRELData::PackedDrop::PackedDrop(const ExpandedDrop& exp)
     : probability(RareItemSet::compress_rate(exp.probability)) {
   if (!exp.data.can_be_encoded_in_rel_rare_table()) {
-    throw std::runtime_error("item " + exp.data.short_hex() + " has extended attributes and cannot be encoded in a REL file");
+    throw std::runtime_error("item " + exp.data.hex() + " has extended attributes and cannot be encoded in a REL file");
   }
   this->item_code[0] = exp.data.data1[0];
   this->item_code[1] = exp.data.data1[1];
@@ -337,6 +344,8 @@ RareItemSet::RareItemSet(const phosg::JSON& json, std::shared_ptr<const ItemName
                 } else {
                   d.probability = (static_cast<uint64_t>(numerator) << 32) / denominator;
                 }
+              } else {
+                throw std::runtime_error("invalid probability specification");
               }
 
               auto item_desc = spec_json->at(1);

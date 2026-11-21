@@ -1631,6 +1631,9 @@ Action a_disassemble_quest_script(
           S, B, T, or K, for Japanese, English, German, French, Spanish,\n\
           Simplified Chinese, Traditional Chinese, or Korean respectively.\n",
     +[](phosg::Arguments& args) {
+      DataIndex di;
+      di.load_quest_opcode_defs();
+
       std::string data = read_input_data(args);
       auto version = get_cli_version(args);
       if (!args.get<bool>("decompressed")) {
@@ -1647,7 +1650,7 @@ Action a_disassemble_quest_script(
       bool reassembly_mode = args.get<bool>("reassembly");
       bool use_qedit_names = args.get<bool>("qedit");
       std::string result = disassemble_quest_script(
-          data.data(), data.size(), version, language, map_file, reassembly_mode, use_qedit_names);
+          *di.quest_opcodes, data.data(), data.size(), version, language, map_file, reassembly_mode, use_qedit_names);
       write_output_data(args, result, "txt");
     });
 Action a_disassemble_quest_map(
@@ -1679,7 +1682,7 @@ Action a_disassemble_free_map(
       std::string input_filename_lower = phosg::tolower(input_filename);
       bool is_events = input_filename_lower.ends_with(".evt");
       bool is_enemies = input_filename_lower.ends_with("e.dat") || input_filename_lower.ends_with("e_s.dat") || input_filename_lower.ends_with("e_c1.dat") || input_filename_lower.ends_with("e_d.dat");
-      bool is_objects = input_filename_lower.ends_with("o.dat") || input_filename_lower.ends_with("o_s.dat") || input_filename_lower.ends_with("o_c1.dat") || input_filename_lower.ends_with("o_d.dat");
+      bool is_objects = input_filename_lower.ends_with("o.dat") || input_filename_lower.ends_with("o_s.dat") || input_filename_lower.ends_with("o_c1.dat") || input_filename_lower.ends_with("d.dat");
       if (!is_objects && !is_enemies && !is_events) {
         throw std::runtime_error("cannot determine input file type");
       }
@@ -1721,14 +1724,18 @@ Action a_assemble_quest_script(
     uncompressed .bind file instead. If --disable-strict is given, allows some\n\
     invalid behaviors (e.g. calling an undefined label by number).\n",
     +[](phosg::Arguments& args) {
+      DataIndex di;
+      di.load_quest_opcode_defs();
+
       std::string text = read_input_data(args);
 
       const std::string& input_filename = args.get<std::string>(1, false);
       std::string include_dir = (!input_filename.empty() && (input_filename != "-"))
-          ? phosg::dirname(input_filename)
+          ? std::string(phosg::dirname(input_filename))
           : ".";
 
       auto result = assemble_quest_script(
+          *di.quest_opcodes,
           text,
           {include_dir, "system/quests/includes"},
           {include_dir, "system/quests/includes", "system/client-functions/System"},
@@ -1861,19 +1868,29 @@ void a_extract_archive_fn(phosg::Arguments& args) {
     BMLArchive arch(data_shared, args.get<bool>("big-endian"));
     for (const auto& entry_it : arch.all_entries()) {
       {
-        auto e = arch.get(entry_it.first);
-        std::string data = prs_decompress(e.first, e.second);
+        auto entry = arch.get(entry_it.first);
         std::string out_file = output_prefix + entry_it.first;
-        phosg::save_file(out_file, data);
-        phosg::fwrite_fmt(stderr, "... {}\n", out_file);
+        try {
+          std::string data = prs_decompress(entry.first, entry.second);
+          phosg::save_file(out_file, data);
+          phosg::fwrite_fmt(stderr, "... {}\n", out_file);
+        } catch (const std::exception& e) {
+          phosg::save_file(out_file + ".prs", entry.first, entry.second);
+          phosg::fwrite_fmt(stderr, "... {}.prs (failed to decompress: {})\n", out_file, e.what());
+        }
       }
 
-      auto gvm_e = arch.get_gvm(entry_it.first);
-      if (gvm_e.second) {
-        std::string data = prs_decompress(gvm_e.first, gvm_e.second);
+      auto gvm_entry = arch.get_gvm(entry_it.first);
+      if (gvm_entry.second) {
         std::string out_file = output_prefix + entry_it.first + ".gvm";
-        phosg::save_file(out_file, data);
-        phosg::fwrite_fmt(stderr, "... {}\n", out_file);
+        try {
+          std::string data = prs_decompress(gvm_entry.first, gvm_entry.second);
+          phosg::save_file(out_file, data);
+          phosg::fwrite_fmt(stderr, "... {}\n", out_file);
+        } catch (const std::exception& e) {
+          phosg::save_file(out_file + ".prs", gvm_entry.first, gvm_entry.second);
+          phosg::fwrite_fmt(stderr, "... {}.prs (failed to decompress: {})\n", out_file, e.what());
+        }
       }
     }
   } else if (args.get<std::string>(0) == "extract-ppk") {
@@ -2218,6 +2235,7 @@ Action a_convert_rare_item_set(
     +[](phosg::Arguments& args) {
       double rate_factor = args.get<double>("multiply", 1.0);
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_text_index();
@@ -2284,6 +2302,7 @@ Action a_compare_rare_item_set(
       }
 
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_text_index();
@@ -2318,7 +2337,7 @@ static std::shared_ptr<CommonItemSet> load_common_item_set(
 Action a_convert_common_item_set(
     "convert-common-item-set", "\
   convert-common-item-set INPUT-FILENAME [OUTPUT-FILENAME]\n\
-    Convert the input rare item set to a JSON representation and write it to\n\
+    Convert the input common item set to a JSON representation and write it to\n\
     OUTPUT-FILENAME or stdout. The input filename must end in one of the\n\
     following extensions:\n\
       .json (newserv JSON common item table)\n\
@@ -2631,6 +2650,7 @@ Action a_describe_item(
       auto version = get_cli_version(args);
 
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_text_index();
@@ -2702,6 +2722,7 @@ Action a_describe_item(
 Action a_name_all_items(
     "name-all-items", nullptr, +[](phosg::Arguments& args) {
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_text_index();
@@ -2787,6 +2808,7 @@ Action a_print_level_stats(
     Print the level tables for each version in a semi-human-readable format.\n",
     +[](phosg::Arguments& args) {
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_level_tables();
@@ -2874,12 +2896,38 @@ Action a_show_item_parameter_tables(
     format.\n",
     +[](phosg::Arguments& args) {
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
-      di->load_all();
+      di->load_config_before();
+      di->load_config_early();
+      di->load_patch_indexes();
+      di->load_text_index();
+      di->load_item_definitions();
+      di->load_item_name_indexes();
       for (Version v : ALL_VERSIONS) {
         const auto& index = di->item_name_index_opt(v);
         if (index) {
           phosg::fwrite_fmt(stdout, "======== {}\n", phosg::name_for_enum(v));
           index->print_table(stdout);
+        }
+      }
+    });
+Action a_generate_item_parameter_tables_html(
+    "generate-item-parameter-tables-html", "\
+  generate-item-parameter-tables-html\n\
+    Generate an HTML file for each item parameter table.\n",
+    +[](phosg::Arguments& args) {
+      auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
+      di->load_config_early();
+      di->load_patch_indexes();
+      di->load_text_index();
+      di->load_item_definitions();
+      di->load_item_name_indexes();
+      for (Version v : ALL_VERSIONS) {
+        const auto& index = di->item_name_index_opt(v);
+        if (index) {
+          std::string filename = std::format("item-parameter-table-{}.html", phosg::name_for_enum(v));
+          phosg::save_file(filename, index->generate_item_parameter_table_html());
+          phosg::log_info_f("... {}", filename);
         }
       }
     });
@@ -2891,7 +2939,11 @@ Action a_show_shop_random_sets(
     format.\n",
     +[](phosg::Arguments& args) {
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
-      di->load_all();
+      di->load_config_before();
+      di->load_config_early();
+      di->load_item_definitions();
+      di->load_item_name_indexes();
+      di->load_drop_tables();
       di->tekker_adjustment_set->print(stdout);
       di->armor_random_set->print(stdout);
       di->tool_random_set->print(stdout);
@@ -3488,6 +3540,7 @@ Action a_check_supermaps(
       bool generate_enemy_stats = args.get<bool>("generate-enemy-stats");
 
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_set_data_tables();
@@ -3566,6 +3619,7 @@ Action a_check_supermaps(
 
       phosg::fwrite_fmt(stderr, "ALL FREE MAPS: {}\n", all_free_maps_eff.str());
 
+      di->load_quest_opcode_defs();
       di->load_quest_index();
 
       SuperMap::EfficiencyStats all_quests_eff;
@@ -3667,6 +3721,8 @@ Action a_materialize_map(
       auto materialized = map_file->materialize_random_sections(seed);
       if (args.get<bool>("disassemble")) {
         write_output_data(args, materialized->disassemble(false, get_cli_version(args)), "txt");
+      } else if (args.get<bool>("decompressed")) {
+        write_output_data(args, materialized->serialize(), "datd");
       } else {
         write_output_data(args, prs_compress_optimal(materialized->serialize()), "dat");
       }
@@ -3883,6 +3939,7 @@ Action a_print_free_supermap(
       }
 
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_set_data_tables();
@@ -3908,15 +3965,17 @@ Action a_check_quests(
       bool reassemble_scripts = args.get<bool>("reassemble-scripts");
       bool reassemble_maps = args.get<bool>("reassemble-maps");
 
-      check_quest_opcode_definitions();
+      check_default_quest_opcode_definitions();
       phosg::log_info_f("Opcode definitions OK");
 
       auto di = std::make_shared<DataIndex>(get_config_filename(args));
       di->is_debug = true;
+      di->load_config_before();
       di->load_config_early();
       di->load_patch_indexes();
       di->load_set_data_tables();
       di->load_maps();
+      di->load_quest_opcode_defs();
       di->load_quest_index(true);
 
       std::atomic<uint64_t> script_time = 0, map_time = 0;
@@ -3955,13 +4014,14 @@ Action a_check_quests(
             uint64_t start_time = phosg::now();
             auto bin = prs_decompress(*vq->bin_contents);
             auto disassembled = disassemble_quest_script(
-                bin.data(), bin.size(), vq->meta.version, vq->meta.language, vq->map_file, false, false);
+                *di->quest_opcodes, bin.data(), bin.size(), vq->meta.version, vq->meta.language, vq->map_file, false, false);
             auto reassembly = disassemble_quest_script(
-                bin.data(), bin.size(), vq->meta.version, vq->meta.language, vq->map_file, true, false);
-            std::string include_dir = phosg::dirname(vq->bin_filename());
+                *di->quest_opcodes, bin.data(), bin.size(), vq->meta.version, vq->meta.language, vq->map_file, true, false);
+            std::string include_dir{phosg::dirname(vq->bin_filename())};
             AssembledQuestScript assembled;
             try {
               assembled = assemble_quest_script(
+                  *di->quest_opcodes,
                   reassembly,
                   {"system/quests/includes"},
                   {"system/quests/includes", "system/client-functions/System"},
@@ -4234,9 +4294,9 @@ Action a_diff_executables(
           throw std::runtime_error("the two files are not the same type of executable, or are neither dol nor xbe");
         }
         for (const auto& it : result) {
-          std::string b_str = phosg::format_data_string(it.b_data, nullptr, phosg::FormatDataStringFlags::HEX_ONLY);
+          std::string b_str = phosg::format_data_string(it.b_data, phosg::FormatDataStringFlags::HEX_ONLY);
           if (show_pre) {
-            std::string a_str = phosg::format_data_string(it.a_data, nullptr, phosg::FormatDataStringFlags::HEX_ONLY);
+            std::string a_str = phosg::format_data_string(it.a_data, phosg::FormatDataStringFlags::HEX_ONLY);
             phosg::fwrite_fmt(stdout, "{:08X}: {} => {}\n", it.address, a_str, b_str);
           } else {
             phosg::fwrite_fmt(stdout, "{:08X} {}\n", it.address, b_str);
@@ -4367,7 +4427,7 @@ Action a_replay_ep3_battle_record(
               ev.print(stdout);
             } else {
               if (use_color) {
-                phosg::print_color_escape(stdout, phosg::TerminalFormat::FG_RED, phosg::TerminalFormat::BOLD, phosg::TerminalFormat::END);
+                phosg::print_color_escape(stdout, phosg::TerminalFormat::FG_YELLOW, phosg::TerminalFormat::BOLD, phosg::TerminalFormat::END);
               }
               ev.print(stdout);
               if (use_color) {
@@ -4480,7 +4540,7 @@ Action a_run_server_replay_log(
       if (args.get<bool>("debug")) {
         data_index->is_debug = true;
       }
-      data_index->load_all();
+      data_index->load_all(args.get<bool>("disable-fast-load") ? 1 : 0);
       auto state = ServerState::create_shared(data_index, !replay_log_filenames.empty());
 
       std::shared_ptr<ServerShell> shell;
@@ -4623,7 +4683,7 @@ Action a_run_server_replay_log(
         }
 
         if (!state->data->http_addresses.empty()) {
-          config_log.info_f("Starting HTTP server");
+          config_log.info_f("Starting API HTTP server");
           state->http_server = std::make_shared<HTTPServer>(state);
           for (const auto& it : state->data->http_addresses) {
             auto netloc = phosg::parse_netloc(it);
