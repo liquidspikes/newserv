@@ -1,6 +1,6 @@
 # newserv <img align="right" src="static/s-newserv.png" />
 
-newserv is a game server, proxy, and reverse-engineering tool for Phantasy Star Online (PSO). **To quickly get started using newserv, just read the [server setup](#server-setup) and [how to connect](#how-to-connect) sections.**
+newserv is a game server, proxy, and reverse-engineering tool for Phantasy Star Online (PSO). **To quickly get started using newserv, just read the [server setup](#server-setup) and [how to connect](#how-to-connect) sections.** For a summary of customizations in this fork relative to upstream, see [`PSOBB_IO_CHANGES.md`](PSOBB_IO_CHANGES.md).
 
 All reverse-engineering in this project is based on inspecting network sessions from the game during its official support period, as well as disassembling publicly-available game clients. The author has no access to Sega's source code or any other private data.
 
